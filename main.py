@@ -7,173 +7,113 @@ from collections import defaultdict
 import math
 
 # -------------------------
-# Load models
+# 1. Setup & Config
 # -------------------------
-yolo_model = YOLO("yolov8n.pt")  # lightweight model
-tracker = DeepSort(max_age=30)
+# Using yolov8m (medium) for better human vs. box discrimination
+model = YOLO("yolov8m.pt") 
+tracker = DeepSort(max_age=20, n_init=3, nms_max_overlap=0.5)
 
 mp_pose = mp.solutions.pose
-pose = mp_pose.Pose()
+pose = mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.6)
 
-# -------------------------
-# Metrics storage
-# -------------------------
-people_data = defaultdict(lambda: {
-    "positions": [],
-    "active_time": 0,
-    "idle_time": 0,
-    "last_movement": 0,
-    "tasks": {
-        "pick_place": 0,
-        "lift_tray": 0
-    }
+# Metrics Storage
+people_metrics = defaultdict(lambda: {
+    "active_frames": 0,
+    "idle_frames": 0,
+    "total_dist": 0,
+    "tasks": {"pick_place": 0, "move_rack": 0},
+    "last_pos": None
 })
 
-# -------------------------
-# Helper functions
-# -------------------------
-def distance(p1, p2):
+# Define a "Work Zone" (Polygon) to ignore the background IDs 6, 19, etc.
+# Coordinates should be adjusted based on your specific camera angle
+WORK_ZONE = np.array([[100, 400], [1100, 400], [1200, 700], [50, 700]], np.int32)
+
+def get_dist(p1, p2):
     return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)
 
-def is_active(movement, threshold=5):
-    return movement > threshold
-
 # -------------------------
-# Video input/output
+# 2. Main Processing
 # -------------------------
 cap = cv2.VideoCapture("factory.mp4")
+width  = int(cap.get(3))
+height = int(cap.get(4))
+out = cv2.VideoWriter("analyzed_factory.mp4", cv2.VideoWriter_fourcc(*'mp4v'), 20, (width, height))
 
-fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-out = cv2.VideoWriter("output.mp4", fourcc, 20.0, 
-                      (int(cap.get(3)), int(cap.get(4))))
-
-frame_id = 0
-
-# -------------------------
-# Main loop
-# -------------------------
 while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
+    success, frame = cap.read()
+    if not success: break
 
-    frame_id += 1
-
-    # -------------------------
-    # Detect people
-    # -------------------------
-    results = yolo_model(frame)[0]
-
+    # YOLO Detection with high confidence threshold (0.6) to avoid IDing boxes
+    results = model.predict(frame, conf=0.6, classes=[0]) # Class 0 is Person
+    
     detections = []
-    for r in results.boxes.data.tolist():
+    for r in results[0].boxes.data.tolist():
         x1, y1, x2, y2, score, cls = r
-        if int(cls) == 0:  # person class
+        # Filter: Only accept if in the lower half of the screen (work area)
+        if y2 > 300: 
             detections.append(([x1, y1, x2-x1, y2-y1], score, 'person'))
 
-    # -------------------------
-    # Track people
-    # -------------------------
+    # Update Tracker
     tracks = tracker.update_tracks(detections, frame=frame)
 
     for track in tracks:
-        if not track.is_confirmed():
-            continue
-
+        if not track.is_confirmed(): continue
+        
         track_id = track.track_id
-        l, t, w, h = map(int, track.to_ltrb())
-        cx, cy = l + w//2, t + h//2
+        ltrb = track.to_ltrb()
+        x1, y1, x2, y2 = map(int, ltrb)
+        cx, cy = (x1+x2)//2, (y1+y2)//2
 
-        # -------------------------
-        # Pose estimation
-        # -------------------------
-        person_crop = frame[t:t+h, l:l+w]
-        rgb = cv2.cvtColor(person_crop, cv2.COLOR_BGR2RGB)
-        result = pose.process(rgb)
+        # --- Biomechanics (Pose) ---
+        roi = frame[max(0,y1):min(height,y2), max(0,x1):min(width,x2)]
+        if roi.size > 0:
+            rgb_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+            res = pose.process(rgb_roi)
+            
+            if res.pose_landmarks:
+                # Get Wrist and Hip for task inference
+                lm = res.pose_landmarks.landmark
+                # Task Inference: Pick & Place (Hands near waist + low torso movement)
+                rwrist_y = lm[mp_pose.PoseLandmark.RIGHT_WRIST].y
+                if 0.4 < rwrist_y < 0.8: # Relative to crop
+                    people_metrics[track_id]["tasks"]["pick_place"] += 1
 
-        left_hand = None
-        right_hand = None
+        # --- Movement Metrics ---
+        curr_pos = (cx, cy)
+        if people_metrics[track_id]["last_pos"]:
+            move_dist = get_dist(curr_pos, people_metrics[track_id]["last_pos"])
+            people_metrics[track_id]["total_dist"] += move_dist
+            
+            if move_dist > 2: # Activity threshold
+                people_metrics[track_id]["active_frames"] += 1
+            else:
+                people_metrics[track_id]["idle_frames"] += 1
+        
+        people_metrics[track_id]["last_pos"] = curr_pos
 
-        if result.pose_landmarks:
-            landmarks = result.pose_landmarks.landmark
+        # --- Visuals ---
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        label = f"Worker {track_id} | Dist: {int(people_metrics[track_id]['total_dist'])}px"
+        cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            left_hand = (
-                int(landmarks[mp_pose.PoseLandmark.LEFT_WRIST].x * w),
-                int(landmarks[mp_pose.PoseLandmark.LEFT_WRIST].y * h)
-            )
-
-            right_hand = (
-                int(landmarks[mp_pose.PoseLandmark.RIGHT_WRIST].x * w),
-                int(landmarks[mp_pose.PoseLandmark.RIGHT_WRIST].y * h)
-            )
-
-            # Draw keypoints
-            for lm in landmarks:
-                px = int(lm.x * w) + l
-                py = int(lm.y * h) + t
-                cv2.circle(frame, (px, py), 2, (0,255,0), -1)
-
-        # -------------------------
-        # Movement tracking
-        # -------------------------
-        pdata = people_data[track_id]
-        pdata["positions"].append((cx, cy))
-
-        movement = 0
-        if len(pdata["positions"]) > 1:
-            movement = distance(pdata["positions"][-1], pdata["positions"][-2])
-
-        # Active / Idle
-        if is_active(movement):
-            pdata["active_time"] += 1
-        else:
-            pdata["idle_time"] += 1
-
-        # -------------------------
-        # Task detection (heuristics)
-        # -------------------------
-
-        # Task 1: Pick & Place (hand moving quickly near bottom area)
-        if left_hand and right_hand:
-            hand_movement = distance(left_hand, right_hand)
-
-            if hand_movement < 50 and cy > frame.shape[0]*0.6:
-                pdata["tasks"]["pick_place"] += 1
-
-        # Task 2: Lift tray (both hands high + vertical motion)
-        if left_hand and right_hand:
-            if left_hand[1] < h*0.5 and right_hand[1] < h*0.5:
-                if movement > 8:
-                    pdata["tasks"]["lift_tray"] += 1
-
-        # -------------------------
-        # Draw bounding box + info
-        # -------------------------
-        cv2.rectangle(frame, (l, t), (l+w, t+h), (255,0,0), 2)
-
-        text = f"ID {track_id}"
-        cv2.putText(frame, text, (l, t-10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
-
+    cv2.imshow("Factory Analysis", frame)
     out.write(frame)
-    cv2.imshow("Frame", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'): break
 
-    if cv2.waitKey(1) & 0xFF == 27:
-        break
-
-# -------------------------
-# Cleanup
-# -------------------------
 cap.release()
 out.release()
 cv2.destroyAllWindows()
 
 # -------------------------
-# Print metrics
+# 3. Final Analytics Report
 # -------------------------
-print("\n=== METRICS ===")
-for pid, data in people_data.items():
-    print(f"\nPerson {pid}")
-    print(f"Active time: {data['active_time']}")
-    print(f"Idle time: {data['idle_time']}")
-    print(f"Pick & Place: {data['tasks']['pick_place']}")
-    print(f"Lift tray: {data['tasks']['lift_tray']}")
+print("\n" + "="*30)
+print("FINAL PRODUCTIVITY REPORT")
+print("="*30)
+for tid, m in people_metrics.items():
+    active_sec = m['active_frames'] / 20
+    print(f"Worker {tid}:")
+    print(f" - Movement: {int(m['total_dist'])} pixels")
+    print(f" - Productivity Score: {active_sec:.1f}s active")
+    print(f" - Tasks: {m['tasks']['pick_place'] // 10} items packed")
