@@ -1,0 +1,4 @@
+opencv-python
+deep-sort-realtime
+mediapipe
+ultralytics
