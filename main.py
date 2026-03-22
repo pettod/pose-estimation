@@ -3,6 +3,7 @@ from collections import defaultdict
 
 import cv2
 import numpy as np
+import torch
 from deep_sort_realtime.deepsort_tracker import DeepSort
 from ultralytics import YOLO
 
@@ -82,8 +83,20 @@ def kpt_ok(kpts, kconf, idx):
     return kpts[idx][0] > 0 and kpts[idx][1] > 0
 
 
-def load_pose_model():
-    return YOLO("yolov8m-pose.pt")
+def select_inference_device():
+    """Prefer Apple MPS, then CUDA, else CPU."""
+    mps = getattr(torch.backends, "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps"
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
+
+
+def load_pose_model(device):
+    model = YOLO("yolov8m-pose.pt")
+    model.to(device)
+    return model
 
 
 def create_tracker():
@@ -326,7 +339,7 @@ def process_tracks_on_frame(
         )
 
 
-def run_pipeline(input_video, pose_model, tracker, people_metrics):
+def run_pipeline(input_video, pose_model, tracker, people_metrics, device):
     output_video = input_video.replace(".mp4", OUTPUT_SUFFIX)
     cap = cv2.VideoCapture(input_video)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -341,7 +354,13 @@ def run_pipeline(input_video, pose_model, tracker, people_metrics):
             if not success:
                 break
 
-            results = pose_model.predict(frame, conf=POSE_CONF, verbose=False)
+            results = pose_model.predict(
+                frame,
+                conf=POSE_CONF,
+                verbose=False,
+                device=device,
+                half=(device == "cuda"),
+            )
             pose_result = results[0]
             detections, det_xyxy, frame_keypoints, frame_kpt_conf = build_pose_detections(
                 pose_result
@@ -369,10 +388,13 @@ def run_pipeline(input_video, pose_model, tracker, people_metrics):
 
 
 def main():
+    device = select_inference_device()
+    print(f"Inference device: {device}")
+
     people_metrics = defaultdict(new_person_metrics)
-    pose_model = load_pose_model()
+    pose_model = load_pose_model(device)
     tracker = create_tracker()
-    run_pipeline(INPUT_VIDEO, pose_model, tracker, people_metrics)
+    run_pipeline(INPUT_VIDEO, pose_model, tracker, people_metrics, device)
     print_productivity_report(people_metrics, FPS)
 
 
