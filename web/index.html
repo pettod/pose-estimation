@@ -268,7 +268,7 @@
 
       <div class="panel">
         <h2>Worker snapshots</h2>
-        <p class="sub" style="margin-top:0;margin-bottom:0.75rem;font-size:0.85rem;">First bbox crop per logical worker ID (from <code>output/worker_ids/&lt;video&gt;/</code>). Missing images mean no snapshot was saved for that ID.</p>
+        <p class="sub" style="margin-top:0;margin-bottom:0.75rem;font-size:0.85rem;">First bbox crop per worker ID</p>
         <div id="workerGallery"></div>
       </div>
 
@@ -285,12 +285,12 @@
 
       <div class="panel">
         <h2>Share of time per grid cell (heatmap, %)</h2>
-        <p class="sub" style="margin-top:0;margin-bottom:0.75rem;font-size:0.85rem;">Each cell shows what share of the person’s tracked time was spent there (sums to 100%). 8×16 bins; 16 along the wider frame side. Bbox center each frame. Overlaid on <code>web/first_frame.jpg</code> (match processed video resolution and aspect ratio).</p>
+        <p class="sub" style="margin-top:0;margin-bottom:0.75rem;font-size:0.85rem;">Each cell shows what share of the person’s tracked time was spent there (sums to 100%). 8×16 bins; 16 along the wider frame side.</p>
         <div id="heatmaps"></div>
       </div>
 
       <div class="panel">
-        <h2>Task-related frame counts (heuristic)</h2>
+        <h2>Task-related frame counts</h2>
         <div class="chart-box tall"><canvas id="chartTasks"></canvas></div>
       </div>
 
@@ -301,9 +301,9 @@
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Active s</th>
-                <th>Idle s</th>
-                <th>Move px</th>
+                <th>Active (s)</th>
+                <th>Idle (s)</th>
+                <th>Move (px)</th>
                 <th>Pick</th>
                 <th>Lift</th>
                 <th>Rack</th>
@@ -431,7 +431,6 @@
         .join("");
       heatEl.innerHTML = `
         <div class="hm-bar">
-          <span class="hm-bar-label">Worker</span>
           ${buttonsHtml}
         </div>
         <div class="hm-composite">
