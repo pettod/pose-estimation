@@ -1,4 +1,6 @@
-"""Per-person activity metrics and idle/active logic."""
+"""Per-person activity: biomechanical ACTIVE/IDLE + quadrant time (YOLOv8l-Pose)."""
+from typing import Literal
+
 import config
 
 from . import geometry
@@ -17,10 +19,11 @@ def new_person_metrics():
         "active_frames": 0,
         "idle_frames": 0,
         "total_dist": 0,
-        "tasks": {"pick_place": 0, "move_rack": 0},
+        "tasks": {"pick_place": 0, "lift_tray": 0, "move_rack": 0},
+        "zone_frames": {k: 0 for k in config.FLOOR_ZONE_KEYS},
         "last_pos": None,
-        "prev_wrist_dist": None,
-        "idle_streak": config.IDLE_FRAME_LIMIT,
+        "prev_wrist_extension": None,
+        "idle_streak": 0,
     }
 
 
@@ -33,54 +36,99 @@ def update_movement_distance(metrics, curr_pos):
     return move_dist
 
 
-def evaluate_activity_and_update_metrics(
-    metrics, kpts, kconf, frame_height, cx, cy, move_dist
-):
-    th_scale = 0.5 / max(config.ACTIVITY_THRESHOLD, 0.05)
-    wrist_activity = 0.0
-    is_picking = False
-    is_lifting = False
-    is_moving_rack = move_dist > 5.0 * th_scale
+def record_zone_frame(metrics, cx, cy, frame_width, frame_height):
+    z = config.floor_zone_key(cx, cy, frame_width, frame_height)
+    if z in metrics["zone_frames"]:
+        metrics["zone_frames"][z] += 1
 
-    if (
-        kpts is not None
-        and kpt_ok(kpts, kconf, config.KPT_R_WRIST)
-        and kpt_ok(kpts, kconf, config.KPT_L_WRIST)
-        and kpt_ok(kpts, kconf, config.KPT_L_HIP)
-        and kpt_ok(kpts, kconf, config.KPT_R_HIP)
+
+def _biomechanical_signals(kpts, kconf, metrics, move_dist):
+    """
+    Returns (raw_active, wrist_extension_change, lifting, global_move).
+    - Global displacement: centroid motion > GLOBAL_DISPLACEMENT_PX.
+    - Wrist–torso extension: mean distance (wrists 9,10 to hip midpoint 11,12);
+      active if |Δextension| > WRIST_EXTENSION_DELTA_PX vs previous frame.
+    - Lifting: either wrist above its shoulder (y smaller in image coords).
+    """
+    global_move = move_dist > config.GLOBAL_DISPLACEMENT_PX
+    wrist_extension_change = False
+    lifting = False
+
+    if kpts is None:
+        metrics["prev_wrist_extension"] = None
+        return global_move, wrist_extension_change, lifting, global_move
+
+    lw, rw = config.KPT_L_WRIST, config.KPT_R_WRIST
+    lh, rh = config.KPT_L_HIP, config.KPT_R_HIP
+    ls, rs = config.KPT_L_SHOULDER, config.KPT_R_SHOULDER
+
+    if not (
+        kpt_ok(kpts, kconf, lw)
+        and kpt_ok(kpts, kconf, rw)
+        and kpt_ok(kpts, kconf, lh)
+        and kpt_ok(kpts, kconf, rh)
     ):
-        r_wrist = kpts[config.KPT_R_WRIST]
-        l_wrist = kpts[config.KPT_L_WRIST]
-        torso_center = (kpts[config.KPT_L_HIP] + kpts[config.KPT_R_HIP]) / 2.0
-        dist_r = geometry.get_dist(r_wrist[:2], torso_center[:2])
-        prev = metrics["prev_wrist_dist"]
-        if prev is not None:
-            wrist_activity = abs(dist_r - prev)
-        metrics["prev_wrist_dist"] = dist_r
+        metrics["prev_wrist_extension"] = None
+        raw = global_move
+        return raw, False, False, global_move
 
-        is_picking = wrist_activity > 3.0 * th_scale and cy > frame_height * 0.4
-        if kpt_ok(kpts, kconf, config.KPT_L_SHOULDER) and kpt_ok(
-            kpts, kconf, config.KPT_R_SHOULDER
-        ):
-            is_lifting = (
-                r_wrist[1] < kpts[config.KPT_L_SHOULDER][1]
-                or l_wrist[1] < kpts[config.KPT_R_SHOULDER][1]
-            ) and wrist_activity > 5.0 * th_scale
-    else:
-        metrics["prev_wrist_dist"] = None
+    torso = (kpts[lh][:2] + kpts[rh][:2]) / 2.0
+    d_l = geometry.get_dist(kpts[lw][:2], torso)
+    d_r = geometry.get_dist(kpts[rw][:2], torso)
+    extension = (d_l + d_r) / 2.0
+    prev = metrics["prev_wrist_extension"]
+    metrics["prev_wrist_extension"] = float(extension)
+    if prev is not None:
+        wrist_extension_change = (
+            abs(extension - prev) > config.WRIST_EXTENSION_DELTA_PX
+        )
 
-    frame_active = is_picking or is_lifting or is_moving_rack
-    if frame_active:
+    if kpt_ok(kpts, kconf, ls) and kpt_ok(kpts, kconf, rs):
+        lifting = (kpts[lw][1] < kpts[ls][1]) or (kpts[rw][1] < kpts[rs][1])
+
+    raw = global_move or wrist_extension_change or lifting
+    return raw, wrist_extension_change, lifting, global_move
+
+
+def evaluate_activity(
+    metrics,
+    kpts,
+    kconf,
+    move_dist,
+    frame_height,
+) -> Literal["ACTIVE", "IDLE"]:
+    """
+    Biomechanical ACTIVE/IDLE with idle_streak (IDLE_STREAK_FRAMES) debouncing.
+    Updates active_frames / idle_frames / tasks to match the returned label.
+    """
+    _ = frame_height
+    raw, wrist_ch, lifting, global_move = _biomechanical_signals(
+        kpts, kconf, metrics, move_dist
+    )
+
+    if raw:
         metrics["idle_streak"] = 0
         metrics["active_frames"] += 1
-        if is_picking:
+        if wrist_ch:
             metrics["tasks"]["pick_place"] += 1
-        if is_moving_rack:
+        if lifting:
+            metrics["tasks"]["lift_tray"] += 1
+        if global_move:
             metrics["tasks"]["move_rack"] += 1
         return "ACTIVE"
 
     metrics["idle_streak"] += 1
+    if metrics["idle_streak"] < config.IDLE_STREAK_FRAMES:
+        metrics["active_frames"] += 1
+        return "ACTIVE"
+
     metrics["idle_frames"] += 1
-    if metrics["idle_streak"] >= config.IDLE_FRAME_LIMIT:
-        return "IDLE"
-    return "ACTIVE"
+    return "IDLE"
+
+
+def evaluate_activity_and_update_metrics(
+    metrics, kpts, kconf, frame_height, cx, cy, move_dist
+):
+    """Backward-compatible name; cx/cy unused (centroid already in move_dist path)."""
+    _ = cx, cy
+    return evaluate_activity(metrics, kpts, kconf, move_dist, frame_height)

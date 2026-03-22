@@ -1,4 +1,7 @@
-"""YOLO pose results → DeepSort detections + keypoint IoU matching."""
+"""YOLO pose results → DeepSort detections + keypoint IoU matching.
+
+Keypoints: one .cpu().numpy() per tensor per frame (MPS-friendly; avoid per-detection sync).
+"""
 import numpy as np
 
 import config
@@ -19,19 +22,20 @@ def build_pose_detections(pose_result):
     if pose_result.boxes is None or len(pose_result.boxes) == 0:
         return detections, det_xyxy, frame_keypoints, frame_kpt_conf
 
-    xyxy = pose_result.boxes.xyxy.cpu().numpy()
-    conf = pose_result.boxes.conf.cpu().numpy()
-    cls = pose_result.boxes.cls.cpu().numpy()
-    kpts_all = (
-        pose_result.keypoints.xy.cpu().numpy()
-        if pose_result.keypoints is not None
-        else None
-    )
-    kconf_all = (
-        pose_result.keypoints.conf.cpu().numpy()
-        if pose_result.keypoints is not None and pose_result.keypoints.conf is not None
-        else None
-    )
+    # Single host copy per tensor per frame (not inside the per-person loop).
+    xyxy = pose_result.boxes.xyxy.detach().cpu().numpy()
+    conf = pose_result.boxes.conf.detach().cpu().numpy()
+    cls = pose_result.boxes.cls.detach().cpu().numpy()
+    if pose_result.keypoints is not None:
+        kpts_all = pose_result.keypoints.xy.detach().cpu().numpy()
+        kconf_all = (
+            pose_result.keypoints.conf.detach().cpu().numpy()
+            if pose_result.keypoints.conf is not None
+            else None
+        )
+    else:
+        kpts_all = None
+        kconf_all = None
 
     for i in range(len(xyxy)):
         if int(round(cls[i])) != 0:

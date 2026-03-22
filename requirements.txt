@@ -2,3 +2,5 @@ opencv-python
 deep-sort-realtime
 ultralytics
 tqdm
+fastapi>=0.115
+uvicorn[standard]>=0.30

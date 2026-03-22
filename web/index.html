@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Factory floor — pose tracking & metrics</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0c0f14;
+      --surface: #151a22;
+      --border: #2a3344;
+      --text: #e8edf5;
+      --muted: #8b9cb3;
+      --accent: #3b8eea;
+      --accent-dim: #2563a8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem 3rem;
+    }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin: 0 0 0.25rem;
+      letter-spacing: -0.02em;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 1.25rem;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.1rem;
+      margin-bottom: 1.25rem;
+    }
+    .panel h2 {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0 0 0.75rem;
+      font-weight: 600;
+    }
+    video {
+      width: 100%;
+      max-height: 52vh;
+      border-radius: 8px;
+      background: #000;
+    }
+    .paths {
+      font-size: 0.8rem;
+      color: var(--muted);
+      word-break: break-all;
+      margin-top: 0.75rem;
+    }
+    .paths dt { font-weight: 600; color: var(--text); margin-top: 0.5rem; }
+    .paths dt:first-child { margin-top: 0; }
+    .grid-charts {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 840px) {
+      .grid-charts.two { grid-template-columns: 1fr 1fr; }
+    }
+    .chart-box {
+      position: relative;
+      height: 260px;
+    }
+    .chart-box.tall { height: 300px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.45rem 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    tr:hover td { background: rgba(59, 142, 234, 0.06); }
+    .err {
+      background: #2d1f1f;
+      border-color: #5c3d3d;
+      color: #f0a8a8;
+      padding: 1rem;
+      border-radius: 8px;
+    }
+    .badge {
+      display: inline-block;
+      background: var(--accent-dim);
+      color: #fff;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      margin-left: 0.35rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Factory floor analytics</h1>
+    <p class="sub" id="metaLine">Pose tracking + DeepSort · supplementary metrics</p>
+
+    <div id="errorBox" class="panel err" style="display: none;"></div>
+
+    <div id="content" style="display: none;">
+      <div class="panel">
+        <h2>Annotated video (per-person tracks)</h2>
+        <video id="player" controls playsinline></video>
+        <dl class="paths">
+          <dt>Input</dt>
+          <dd id="pathIn"></dd>
+          <dt>Output</dt>
+          <dd id="pathOut"></dd>
+        </dl>
+      </div>
+
+      <div class="grid-charts two">
+        <div class="panel">
+          <h2>Active vs idle time (s)</h2>
+          <div class="chart-box"><canvas id="chartActiveIdle"></canvas></div>
+        </div>
+        <div class="panel">
+          <h2>Total movement (px)</h2>
+          <div class="chart-box"><canvas id="chartMove"></canvas></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Time in screen quadrants (s)</h2>
+        <div class="chart-box tall"><canvas id="chartZones"></canvas></div>
+      </div>
+
+      <div class="panel">
+        <h2>Task-related frame counts (heuristic)</h2>
+        <div class="chart-box tall"><canvas id="chartTasks"></canvas></div>
+      </div>
+
+      <div class="panel">
+        <h2>Per-person summary</h2>
+        <div style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Active s</th>
+                <th>Idle s</th>
+                <th>Move px</th>
+                <th>TL</th>
+                <th>TR</th>
+                <th>BL</th>
+                <th>BR</th>
+                <th>Pick</th>
+                <th>Lift</th>
+                <th>Rack</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const chartColors = [
+      "#3b8eea", "#22c55e", "#eab308", "#a855f7", "#f97316",
+      "#06b6d4", "#ec4899", "#84cc16"
+    ];
+
+    function basename(p) {
+      if (!p) return "";
+      const parts = p.replace(/\\/g, "/").split("/");
+      return parts[parts.length - 1] || p;
+    }
+
+    let charts = [];
+
+    function destroyCharts() {
+      charts.forEach((c) => c.destroy());
+      charts = [];
+    }
+
+    function workerMetrics(w) {
+      if (w.metrics) return w.metrics;
+      return {
+        active_seconds: w.active_seconds,
+        idle_seconds: (w.idle_frames / (window.__fps || 30)) || 0,
+        total_movement_pixels: w.movement_pixels,
+        zone_time_seconds: {
+          top_left: 0,
+          top_right: 0,
+          bottom_left: 0,
+          bottom_right: 0,
+        },
+      };
+    }
+
+    function zoneSeconds(w) {
+      const z = workerMetrics(w).zone_time_seconds || {};
+      if (z.top_left != null || z.top_right != null || z.bottom_left != null || z.bottom_right != null) {
+        return {
+          top_left: +(z.top_left ?? 0),
+          top_right: +(z.top_right ?? 0),
+          bottom_left: +(z.bottom_left ?? 0),
+          bottom_right: +(z.bottom_right ?? 0),
+        };
+      }
+      return {
+        top_left: +(z.left ?? 0),
+        top_right: +(z.center ?? 0),
+        bottom_left: +(z.right ?? 0),
+        bottom_right: 0,
+      };
+    }
+
+    function workerTasks(w) {
+      if (w.tasks && w.tasks.pick_place_small_object_frames !== undefined) return w.tasks;
+      return {
+        pick_place_small_object_frames: w.tasks?.pick_place_frames ?? 0,
+        lift_tray_frames: 0,
+        move_rack_frames: w.tasks?.move_rack_frames ?? 0,
+        pick_place_approx: w.tasks?.pick_place_approx ?? 0,
+        lift_tray_approx: 0,
+        move_rack_approx: w.tasks?.move_rack_approx ?? 0,
+      };
+    }
+
+    async function load() {
+      const metaLine = document.getElementById("metaLine");
+      const errBox = document.getElementById("errorBox");
+      const content = document.getElementById("content");
+
+      let res;
+      try {
+        res = await fetch("/api/stats");
+      } catch (e) {
+        errBox.style.display = "block";
+        errBox.textContent = "Could not reach the dashboard API. Is the server running?";
+        metaLine.textContent = "";
+        return;
+      }
+
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        errBox.style.display = "block";
+        errBox.textContent = j.error || "Failed to load stats.";
+        metaLine.textContent = "";
+        return;
+      }
+
+      const data = await res.json();
+      errBox.style.display = "none";
+      content.style.display = "block";
+
+      window.__fps = data.fps || 30;
+      const fps = data.fps ?? 30;
+      const workers = data.statistics?.workers ?? [];
+      const wcount = data.statistics?.worker_count ?? workers.length;
+
+      metaLine.innerHTML =
+        `FPS: <strong>${fps}</strong> <span class="badge">${wcount} tracked people</span>`;
+
+      document.getElementById("pathIn").textContent = data.video_path || "—";
+      document.getElementById("pathOut").textContent = data.output_video_path || "—";
+
+      const outBase = basename(data.output_video_path);
+      const vid = document.getElementById("player");
+      if (outBase) {
+        vid.src = "/media/output/" + encodeURIComponent(outBase);
+      }
+
+      const labels = workers.map((w) => "W" + w.number);
+
+      destroyCharts();
+
+      const axis = {
+        x: { ticks: { color: "#8b9cb3" }, grid: { color: "rgba(42,51,68,0.6)" } },
+        y: { beginAtZero: true, ticks: { color: "#8b9cb3" }, grid: { color: "rgba(42,51,68,0.6)" } },
+      };
+
+      const act = workers.map((w) => workerMetrics(w).active_seconds ?? 0);
+      const idl = workers.map((w) => workerMetrics(w).idle_seconds ?? 0);
+      const movePx = workers.map((w) => workerMetrics(w).total_movement_pixels ?? 0);
+
+      charts.push(
+        new Chart(document.getElementById("chartActiveIdle"), {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              { label: "Active (s)", data: act, backgroundColor: "#22c55e", stack: "t" },
+              { label: "Idle (s)", data: idl, backgroundColor: "#475569", stack: "t" },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: "#8b9cb3" } } },
+            scales: { x: { stacked: true, ...axis.x }, y: { stacked: true, ...axis.y } },
+          },
+        })
+      );
+
+      charts.push(
+        new Chart(document.getElementById("chartMove"), {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Pixels",
+                data: movePx,
+                backgroundColor: chartColors.map((_, i) => chartColors[i % chartColors.length]),
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: "#8b9cb3" } } },
+            scales: axis,
+          },
+        })
+      );
+
+      const zq = workers.map(zoneSeconds);
+      const ztl = zq.map((z) => z.top_left);
+      const ztr = zq.map((z) => z.top_right);
+      const zbl = zq.map((z) => z.bottom_left);
+      const zbr = zq.map((z) => z.bottom_right);
+
+      charts.push(
+        new Chart(document.getElementById("chartZones"), {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              { label: "Top left", data: ztl, backgroundColor: "#6366f1", stack: "z" },
+              { label: "Top right", data: ztr, backgroundColor: "#14b8a6", stack: "z" },
+              { label: "Bottom left", data: zbl, backgroundColor: "#f59e0b", stack: "z" },
+              { label: "Bottom right", data: zbr, backgroundColor: "#ec4899", stack: "z" },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: "#8b9cb3" } } },
+            scales: { x: { stacked: true, ...axis.x }, y: { stacked: true, ...axis.y } },
+          },
+        })
+      );
+
+      const tk = workers.map(workerTasks);
+      charts.push(
+        new Chart(document.getElementById("chartTasks"), {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Pick / place",
+                data: tk.map((t) => t.pick_place_small_object_frames ?? t.pick_place_frames ?? 0),
+                backgroundColor: "#3b8eea",
+              },
+              {
+                label: "Lift tray",
+                data: tk.map((t) => t.lift_tray_frames ?? 0),
+                backgroundColor: "#a855f7",
+              },
+              {
+                label: "Move rack",
+                data: tk.map((t) => t.move_rack_frames ?? 0),
+                backgroundColor: "#f97316",
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: "#8b9cb3" } } },
+            scales: axis,
+          },
+        })
+      );
+
+      const tbody = document.getElementById("tbody");
+      tbody.innerHTML = workers
+        .map((w) => {
+          const m = workerMetrics(w);
+          const t = workerTasks(w);
+          const z = zoneSeconds(w);
+          return `<tr>
+          <td><strong>${w.number}</strong></td>
+          <td>${(m.active_seconds ?? 0).toFixed?.(2) ?? m.active_seconds}</td>
+          <td>${(m.idle_seconds ?? 0).toFixed?.(2) ?? m.idle_seconds}</td>
+          <td>${m.total_movement_pixels ?? 0}</td>
+          <td>${z.top_left.toFixed(2)}</td>
+          <td>${z.top_right.toFixed(2)}</td>
+          <td>${z.bottom_left.toFixed(2)}</td>
+          <td>${z.bottom_right.toFixed(2)}</td>
+          <td>${t.pick_place_approx ?? 0}</td>
+          <td>${t.lift_tray_approx ?? 0}</td>
+          <td>${t.move_rack_approx ?? 0}</td>
+        </tr>`;
+        })
+        .join("");
+
+      if (workers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="11">No workers in stats.</td></tr>';
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

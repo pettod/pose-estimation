@@ -50,8 +50,10 @@ def run_pipeline(input_video, pose_model, tracker, people_metrics, device):
                 )
                 tracks = tracker.update_tracks(detections, frame=frame)
 
+                drawing.draw_floor_zone_overlay(frame, width, height)
                 drawing.process_tracks_on_frame(
                     frame,
+                    width,
                     height,
                     tracks,
                     det_xyxy,

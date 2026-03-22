@@ -5,6 +5,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 VIDEOS_DIR = PROJECT_ROOT / "videos"
 MODELS_DIR = PROJECT_ROOT / "models"
 OUTPUT_DIR = PROJECT_ROOT / "output"
+STATS_JSON_PATH = PROJECT_ROOT / "stats.json"
 
 INPUT_VIDEO_NAME = "video_short.mp4"
 OUTPUT_SUFFIX = "_annotated.mp4"
@@ -15,8 +16,10 @@ FPS = 30
 WINDOW_NAME = "High-Accuracy Factory Analysis"
 SHOW_PREVIEW = True
 
-ACTIVITY_THRESHOLD = 0.45
-IDLE_FRAME_LIMIT = 30
+# Active/idle (YOLOv8l-Pose biomechanics)
+GLOBAL_DISPLACEMENT_PX = 5.0  # bbox centroid motion vs last frame (floor movement)
+WRIST_EXTENSION_DELTA_PX = 3.5  # |Δ| mean wrist–torso extension → pick/place
+IDLE_STREAK_FRAMES = 30  # consecutive non-active frames before IDLE (anti-flicker)
 
 KPT_L_WRIST, KPT_R_WRIST = 9, 10
 KPT_L_SHOULDER, KPT_R_SHOULDER = 5, 6
@@ -29,6 +32,32 @@ COCO_SKELETON = [
 
 KPT_CONF_MIN = 0.2
 IOU_MATCH_MIN = 0.1
+
+# Screen quadrants (time-in-area): bbox center in image space, not world position.
+FLOOR_ZONE_KEYS = ("top_left", "top_right", "bottom_left", "bottom_right")
+FLOOR_ZONE_LABELS = {
+    "top_left": "Top left",
+    "top_right": "Top right",
+    "bottom_left": "Bottom left",
+    "bottom_right": "Bottom right",
+}
+
+
+def floor_zone_key(cx: float, cy: float, frame_width: int, frame_height: int) -> str:
+    """Map person center to a screen quadrant (2x2 split)."""
+    w = max(int(frame_width), 1)
+    h = max(int(frame_height), 1)
+    xf = cx / w
+    yf = cy / h
+    left = xf < 0.5
+    top = yf < 0.5
+    if top and left:
+        return "top_left"
+    if top and not left:
+        return "top_right"
+    if not top and left:
+        return "bottom_left"
+    return "bottom_right"
 
 
 def path_input_video():

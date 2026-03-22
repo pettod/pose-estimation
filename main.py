@@ -23,7 +23,7 @@ def main():
     pose_model = load_pose_model(device)
     tracker = create_tracker()
     run_pipeline(input_path, pose_model, tracker, people_metrics, device)
-    print_productivity_report(people_metrics, config.FPS)
+    print_productivity_report(people_metrics, config.FPS, input_path)
 
 
 if __name__ == "__main__":
