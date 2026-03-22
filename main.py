@@ -32,6 +32,18 @@ people_metrics = defaultdict(lambda: {
 def get_dist(p1, p2):
     return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)
 
+
+def color_bgr_for_track(track_id):
+    """Stable, distinct BGR color per DeepSort track id (OpenCV HSV 0–179)."""
+    try:
+        tid = int(track_id)
+    except (TypeError, ValueError):
+        tid = abs(hash(str(track_id)))
+    hue = (tid * 47) % 180
+    hsv = np.uint8([[[hue, 200, 255]]])
+    bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0]
+    return int(bgr[0]), int(bgr[1]), int(bgr[2])
+
 # -------------------------
 # 2. Main Processing
 # -------------------------
@@ -92,9 +104,10 @@ while cap.isOpened():
         people_metrics[track_id]["last_pos"] = curr_pos
 
         # --- Visuals ---
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        box_color = color_bgr_for_track(track_id)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
         label = f"Worker {track_id} | Dist: {int(people_metrics[track_id]['total_dist'])}px"
-        cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 2)
 
     cv2.imshow("Factory Analysis", frame)
     out.write(frame)
