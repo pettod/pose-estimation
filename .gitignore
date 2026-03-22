@@ -1,7 +1,7 @@
 .DS_Store
+stats.json
 
 *.mp4
 *.pt
 *.pyc
-
-stats.json
+*.jpg

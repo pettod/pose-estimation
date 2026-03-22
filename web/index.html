@@ -112,30 +112,98 @@
       font-size: 0.75rem;
       margin-left: 0.35rem;
     }
-    .hm-work { margin-bottom: 1rem; }
-    .hm-work:last-child { margin-bottom: 0; }
-    .hm-title {
+    .hm-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.85rem;
+    }
+    .hm-bar-label {
       font-size: 0.8rem;
       color: var(--muted);
-      margin-bottom: 0.4rem;
+      margin-right: 0.25rem;
+    }
+    .hm-worker-btn {
+      appearance: none;
+      font: inherit;
+      font-size: 0.8rem;
       font-weight: 600;
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      border: 2px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+    }
+    .hm-worker-btn:hover,
+    .hm-worker-btn:focus-visible {
+      outline: none;
+      background: rgba(59, 142, 234, 0.12);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(59, 142, 234, 0.25);
+    }
+    .hm-worker-btn.hm-worker-btn--on {
+      background: rgba(59, 142, 234, 0.2);
+      border-color: var(--accent);
+    }
+    .hm-composite {
+      position: relative;
+      width: 100%;
+      max-width: 960px;
+      line-height: 0;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #000;
+    }
+    .hm-bg {
+      width: 100%;
+      height: auto;
+      display: block;
+      vertical-align: top;
+    }
+    .hm-overlay {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: stretch;
+      justify-content: stretch;
+    }
+    .hm-overlay-msg {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      padding: 1rem;
+      background: rgba(12, 15, 20, 0.65);
+      color: var(--text);
+      line-height: 1.4;
+      font-size: 0.9rem;
     }
     .hm-grid {
       display: grid;
       gap: 1px;
-      background: var(--border);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      overflow: hidden;
+      /* Semi-transparent black gutters so the frame shows through */
+      background: rgba(0, 0, 0, 0.8);
       width: 100%;
-      max-width: 640px;
+      height: 100%;
+      min-height: 0;
+      box-sizing: border-box;
     }
     .hm-cell {
-      min-height: 8px;
+      min-height: 0;
       min-width: 0;
-      background: rgba(59, 142, 234, 0.08);
+      background: transparent;
       font-size: clamp(0.45rem, 1.1vw, 0.65rem);
-      color: rgba(232, 237, 245, 0.85);
+      color: rgba(232, 237, 245, 0.95);
+      text-shadow: 0 0 3px #000, 0 0 6px rgba(0, 0, 0, 0.8);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -172,8 +240,8 @@
       </div>
 
       <div class="panel">
-        <h2>Time per grid cell (heatmap, seconds)</h2>
-        <p class="sub" style="margin-top:0;margin-bottom:0.75rem;font-size:0.85rem;">8×16 bins; 16 along the wider frame side. Bbox center each frame.</p>
+        <h2>Share of time per grid cell (heatmap, %)</h2>
+        <p class="sub" style="margin-top:0;margin-bottom:0.75rem;font-size:0.85rem;">Each cell shows what share of the person’s tracked time was spent there (sums to 100%). 8×16 bins; 16 along the wider frame side. Bbox center each frame. Overlaid on <code>web/first_frame.jpg</code> (match processed video resolution and aspect ratio).</p>
         <div id="heatmaps"></div>
       </div>
 
@@ -233,29 +301,80 @@
       };
     }
 
-    function buildWorkerHeatmap(w, gridMeta) {
+    /** Returns HTML for one .hm-grid (single heatmap). Percents are share of total seconds in all cells. */
+    function buildHeatmapGridInner(w, gridMeta) {
       const m = workerMetrics(w);
       const secs = m.grid_cell_seconds;
-      if (!secs || !secs.length) {
-        return `<div class="hm-work"><div class="hm-title">Worker ${w.number}</div><p class="sub">No grid data.</p></div>`;
-      }
       const rows = gridMeta.rows;
       const cols = gridMeta.cols;
-      let max = 0;
-      for (let i = 0; i < secs.length; i++) max = Math.max(max, +secs[i] || 0);
-      const cells = [];
+      if (!secs || !secs.length) {
+        return `<p class="sub hm-overlay-msg">No grid data for worker ${w.number}.</p>`;
+      }
+      let totalSec = 0;
+      for (let i = 0; i < secs.length; i++) totalSec += +secs[i] || 0;
+      let maxPct = 0;
+      const cellData = [];
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const v = +secs[r * cols + c] || 0;
-          const t = max > 0 ? v / max : 0;
-          const a = 0.1 + t * 0.9;
-          const label = v >= 0.05 ? v.toFixed(1) : "";
-          cells.push(
-            `<div class="hm-cell" title="row ${r}, col ${c}: ${v.toFixed(2)} s" style="background:rgba(59,142,234,${a})">${label}</div>`
-          );
+          const pct = totalSec > 0 ? (v / totalSec) * 100 : 0;
+          maxPct = Math.max(maxPct, pct);
+          cellData.push({ r, c, v, pct });
         }
       }
-      return `<div class="hm-work"><div class="hm-title">Worker ${w.number}</div><div class="hm-grid" style="grid-template-columns:repeat(${cols},minmax(0,1fr));grid-template-rows:repeat(${rows},minmax(0,1fr));aspect-ratio:${cols} / ${rows};">${cells.join("")}</div></div>`;
+      const cells = [];
+      for (const { r, c, v, pct } of cellData) {
+        const t = maxPct > 0 ? pct / maxPct : 0;
+        const a = 0.06 + t * 0.42;
+        const label =
+          pct >= 0.5 ? (pct >= 10 ? `${Math.round(pct)}%` : `${pct.toFixed(1)}%`) : "";
+        const tip = `row ${r}, col ${c}: ${pct.toFixed(2)}% of time (${v.toFixed(2)} s)`;
+        cells.push(
+          `<div class="hm-cell" title="${tip.replace(/"/g, "&quot;")}" style="background:rgba(59,142,234,${a})">${label}</div>`
+        );
+      }
+      return `<div class="hm-grid" style="grid-template-columns:repeat(${cols},minmax(0,1fr));grid-template-rows:repeat(${rows},minmax(0,1fr));">${cells.join("")}</div>`;
+    }
+
+    function mountInteractiveHeatmap(heatEl, workers, gridMeta) {
+      const buttonsHtml = workers
+        .map(
+          (w, i) =>
+            `<button type="button" class="hm-worker-btn" data-hm-idx="${i}" aria-pressed="false">W${w.number}</button>`
+        )
+        .join("");
+      heatEl.innerHTML = `
+        <div class="hm-bar">
+          <span class="hm-bar-label">Worker</span>
+          ${buttonsHtml}
+        </div>
+        <div class="hm-composite">
+          <img class="hm-bg" src="/static/first_frame.jpg" alt="" decoding="async" />
+          <div class="hm-overlay" id="hm-single"></div>
+        </div>
+        <p class="sub" style="margin:0.5rem 0 0;font-size:0.8rem;">Hover or focus a worker to load their heatmap.</p>`;
+
+      const single = heatEl.querySelector("#hm-single");
+      const btns = heatEl.querySelectorAll(".hm-worker-btn");
+
+      function show(idx) {
+        const w = workers[idx];
+        if (!w || !single) return;
+        single.innerHTML = buildHeatmapGridInner(w, gridMeta);
+        btns.forEach((b, i) => {
+          const on = i === idx;
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+          b.classList.toggle("hm-worker-btn--on", on);
+        });
+      }
+
+      btns.forEach((btn) => {
+        const idx = +btn.dataset.hmIdx;
+        btn.addEventListener("mouseenter", () => show(idx));
+        btn.addEventListener("focus", () => show(idx));
+      });
+
+      show(0);
     }
 
     function workerTasks(w) {
@@ -420,9 +539,7 @@
       const gridMeta = data.statistics?.grid;
       const heatEl = document.getElementById("heatmaps");
       if (heatEl && gridMeta && workers.length) {
-        heatEl.innerHTML = workers
-          .map((w) => buildWorkerHeatmap(w, gridMeta))
-          .join("");
+        mountInteractiveHeatmap(heatEl, workers, gridMeta);
       } else if (heatEl) {
         heatEl.innerHTML = '<p class="sub">No grid data.</p>';
       }

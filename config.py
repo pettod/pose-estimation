@@ -7,7 +7,7 @@ MODELS_DIR = PROJECT_ROOT / "models"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 STATS_JSON_PATH = PROJECT_ROOT / "stats.json"
 
-INPUT_VIDEO_NAME = "video_short.mp4"
+INPUT_VIDEO_NAME = "video_medium.mp4"
 OUTPUT_SUFFIX = "_annotated.mp4"
 
 POSE_MODEL_NAME = "yolov8l-pose.pt"

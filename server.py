@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 import config
 
@@ -45,6 +46,9 @@ async def serve_output_video(name: str):
     if not path.is_file():
         raise HTTPException(status_code=404)
     return FileResponse(path, media_type="video/mp4")
+
+
+app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
 
 def main():
