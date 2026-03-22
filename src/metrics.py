@@ -62,7 +62,10 @@ def evaluate_activity(
     """
     Pick / lift / floor motion from wrist–torso signal + centroid move, with
     hysteresis: show IDLE only after IDLE_STREAK_FRAMES consecutive low-activity frames.
-    active_frames increments only on high-activity frames; idle_frames on every other.
+
+    active_frames / idle_frames match the **on-screen** pill (ACTIVE vs IDLE), not raw
+    motion spikes: hysteresis “ACTIVE” frames count as active time so charts match the video.
+    Task counters still increment only on high-motion frames.
     """
     th_scale = 0.5 / max(config.ACTIVITY_THRESHOLD, 0.05)
     wrist_activity = 0.0
@@ -114,9 +117,11 @@ def evaluate_activity(
         return "ACTIVE"
 
     metrics["idle_streak"] += 1
-    metrics["idle_frames"] += 1
     if metrics["idle_streak"] >= config.IDLE_STREAK_FRAMES:
+        metrics["idle_frames"] += 1
         return "IDLE"
+
+    metrics["active_frames"] += 1
     return "ACTIVE"
 
 
