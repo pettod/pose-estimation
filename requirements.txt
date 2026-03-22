@@ -5,3 +5,5 @@ ultralytics
 tqdm
 fastapi>=0.115
 uvicorn[standard]>=0.30
+transformers>=4.36
+Pillow

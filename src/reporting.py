@@ -2,7 +2,19 @@
 import json
 from pathlib import Path
 
+import cv2
+
 import config
+
+
+def _read_video_dimensions(path: Path) -> tuple[int, int]:
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return 1920, 1080
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    return max(w, 1), max(h, 1)
 
 
 def print_productivity_report(people_metrics, fps, input_video_path: Path):
@@ -14,13 +26,14 @@ def print_productivity_report(people_metrics, fps, input_video_path: Path):
     for tid, m in people_metrics.items():
         active_sec = m["active_frames"] / fps
         idle_sec = m["idle_frames"] / fps
-        zf = m.get("zone_frames", {})
         print(f"Worker {tid}:")
         print(f" - Active {active_sec:.1f}s | Idle {idle_sec:.1f}s | Move: {int(m['total_dist'])} px")
-        z = {k: zf.get(k, 0) / fps for k in config.FLOOR_ZONE_KEYS}
+        gcf = m.get("grid_cell_frames", [0] * config.GRID_CELL_COUNT)
+        total_g = sum(gcf) or 1
+        top = max(range(len(gcf)), key=lambda i: gcf[i]) if gcf else 0
         print(
-            f" - Screen quadrants (s): TL {z['top_left']:.1f} | TR {z['top_right']:.1f} | "
-            f"BL {z['bottom_left']:.1f} | BR {z['bottom_right']:.1f}"
+            f" - Grid: {config.GRID_CELL_COUNT} cells; "
+            f"top cell index {top} ({100.0 * gcf[top] / total_g:.0f}% of time)"
         )
         t = m["tasks"]
         print(
@@ -36,27 +49,37 @@ def _write_stats_json(people_metrics, fps, input_video_path: Path):
     output_video_path = config.path_output_video(input_video_path).resolve()
     stats_path = config.STATS_JSON_PATH
 
+    fw, fh = _read_video_dimensions(input_video_path)
+    grid_rows, grid_cols = config.grid_dimensions_for_frame(fw, fh)
+
+    video_stem = input_video_path.stem
+    snap_dir = config.path_worker_id_images_dir(video_stem)
+
     workers = []
     for tid, m in sorted(people_metrics.items()):
         active_sec = m["active_frames"] / fps
         idle_sec = m["idle_frames"] / fps
-        zf = m.get("zone_frames", {k: 0 for k in config.FLOOR_ZONE_KEYS})
+        gcf = m.get("grid_cell_frames", [0] * config.GRID_CELL_COUNT)
+        grid_sec = [round(c / fps, 4) for c in gcf]
         try:
             number = int(tid)
         except (TypeError, ValueError):
             number = tid
         t = m["tasks"]
+        snap_name = f"worker_{number:04d}.jpg"
+        snap_file = snap_dir / snap_name
+        worker_image_path = str(snap_file.resolve())
+        worker_image_url_path = f"/media/worker_ids/{video_stem}/{snap_name}"
         workers.append(
             {
                 "number": number,
+                "worker_image_path": worker_image_path,
+                "worker_image_url_path": worker_image_url_path,
                 "metrics": {
                     "active_seconds": round(active_sec, 2),
                     "idle_seconds": round(idle_sec, 2),
                     "total_movement_pixels": int(m["total_dist"]),
-                    "zone_time_seconds": {
-                        k: round(zf.get(k, 0) / fps, 2) for k in config.FLOOR_ZONE_KEYS
-                    },
-                    "zone_labels": dict(config.FLOOR_ZONE_LABELS),
+                    "grid_cell_seconds": grid_sec,
                 },
                 "active_frames": m["active_frames"],
                 "idle_frames": m["idle_frames"],
@@ -75,9 +98,18 @@ def _write_stats_json(people_metrics, fps, input_video_path: Path):
         "video_path": str(input_video_path),
         "output_video_path": str(output_video_path),
         "fps": fps,
+        "worker_snapshot_stem": video_stem,
         "statistics": {
             "worker_count": len(workers),
             "workers": workers,
+            "grid": {
+                "rows": grid_rows,
+                "cols": grid_cols,
+                "wide_axis": "width" if fw >= fh else "height",
+                "cell_count": grid_rows * grid_cols,
+                "frame_width": fw,
+                "frame_height": fh,
+            },
         },
     }
 

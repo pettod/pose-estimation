@@ -1,4 +1,5 @@
 """Per-person activity: joint motion + hysteresis ACTIVE/IDLE (YOLOv8 pose)."""
+from collections import deque
 from typing import Literal
 
 import config
@@ -20,10 +21,11 @@ def new_person_metrics():
         "idle_frames": 0,
         "total_dist": 0,
         "tasks": {"pick_place": 0, "lift_tray": 0, "move_rack": 0},
-        "zone_frames": {k: 0 for k in config.FLOOR_ZONE_KEYS},
+        "grid_cell_frames": [0] * config.GRID_CELL_COUNT,
         "last_pos": None,
         "prev_wrist_dist": None,
         "idle_streak": config.IDLE_STREAK_FRAMES,
+        "position_trail": deque(maxlen=config.TRAIL_LENGTH_FRAMES),
     }
 
 
@@ -36,10 +38,13 @@ def update_movement_distance(metrics, curr_pos):
     return move_dist
 
 
-def record_zone_frame(metrics, cx, cy, frame_width, frame_height):
-    z = config.floor_zone_key(cx, cy, frame_width, frame_height)
-    if z in metrics["zone_frames"]:
-        metrics["zone_frames"][z] += 1
+def record_grid_cell(metrics, cx, cy, frame_width, frame_height):
+    idx, _, _ = config.grid_cell_index(cx, cy, frame_width, frame_height)
+    metrics["grid_cell_frames"][idx] += 1
+
+
+def record_position_trail(metrics, cx, cy):
+    metrics["position_trail"].append((int(cx), int(cy)))
 
 
 def _activity_kpt_ok(kpts, kconf, idx):
@@ -62,7 +67,10 @@ def evaluate_activity(
     """
     Pick / lift / floor motion from wrist–torso signal + centroid move, with
     hysteresis: show IDLE only after IDLE_STREAK_FRAMES consecutive low-activity frames.
-    active_frames increments only on high-activity frames; idle_frames on every other.
+
+    active_frames / idle_frames match the **on-screen** pill (ACTIVE vs IDLE), not raw
+    motion spikes: hysteresis “ACTIVE” frames count as active time so charts match the video.
+    Task counters still increment only on high-motion frames.
     """
     th_scale = 0.5 / max(config.ACTIVITY_THRESHOLD, 0.05)
     wrist_activity = 0.0
@@ -114,9 +122,11 @@ def evaluate_activity(
         return "ACTIVE"
 
     metrics["idle_streak"] += 1
-    metrics["idle_frames"] += 1
     if metrics["idle_streak"] >= config.IDLE_STREAK_FRAMES:
+        metrics["idle_frames"] += 1
         return "IDLE"
+
+    metrics["active_frames"] += 1
     return "ACTIVE"
 
 

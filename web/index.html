@@ -112,13 +112,150 @@
       font-size: 0.75rem;
       margin-left: 0.35rem;
     }
+    .hm-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.85rem;
+    }
+    .hm-bar-label {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-right: 0.25rem;
+    }
+    .hm-worker-btn {
+      appearance: none;
+      font: inherit;
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      border: 2px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+    }
+    .hm-worker-btn:hover,
+    .hm-worker-btn:focus-visible {
+      outline: none;
+      background: rgba(59, 142, 234, 0.12);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(59, 142, 234, 0.25);
+    }
+    .hm-worker-btn.hm-worker-btn--on {
+      background: rgba(59, 142, 234, 0.2);
+      border-color: var(--accent);
+    }
+    .hm-composite {
+      position: relative;
+      width: 100%;
+      max-width: 960px;
+      line-height: 0;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #000;
+    }
+    .hm-bg {
+      width: 100%;
+      height: auto;
+      display: block;
+      vertical-align: top;
+    }
+    .hm-overlay {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: stretch;
+      justify-content: stretch;
+    }
+    .hm-overlay-msg {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      padding: 1rem;
+      background: rgba(12, 15, 20, 0.65);
+      color: var(--text);
+      line-height: 1.4;
+      font-size: 0.9rem;
+    }
+    .hm-grid {
+      display: grid;
+      gap: 1px;
+      /* Semi-transparent black gutters so the frame shows through */
+      background: rgba(0, 0, 0, 0.8);
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      box-sizing: border-box;
+    }
+    .hm-cell {
+      min-height: 0;
+      min-width: 0;
+      background: transparent;
+      font-size: clamp(0.45rem, 1.1vw, 0.65rem);
+      color: rgba(232, 237, 245, 0.95);
+      text-shadow: 0 0 3px #000, 0 0 6px rgba(0, 0, 0, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1px;
+      text-align: center;
+      line-height: 1.1;
+    }
+    .worker-gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 1rem;
+    }
+    .worker-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.25);
+    }
+    .worker-card-img-wrap {
+      aspect-ratio: 3 / 4;
+      background: var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .worker-card-img-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .worker-card-id {
+      padding: 0.5rem 0.6rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-align: center;
+      color: var(--text);
+    }
+    .worker-card-ph {
+      color: var(--muted);
+      font-size: 0.75rem;
+      padding: 0.5rem;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="header">
       <h1>Factory floor analytics</h1>
-      <p class="sub" id="metaLine">Pose tracking + SORT · supplementary metrics</p>
+      <p class="sub" id="metaLine">Pose tracking + worker re-ID · supplementary metrics</p>
     </div>
 
     <div id="errorBox" class="panel err" style="display: none;"></div>
@@ -127,6 +264,12 @@
       <div class="panel">
         <h2>Annotated video</h2>
         <video id="player" controls playsinline></video>
+      </div>
+
+      <div class="panel">
+        <h2>Worker snapshots</h2>
+        <p class="sub" style="margin-top:0;margin-bottom:0.75rem;font-size:0.85rem;">First bbox crop per logical worker ID (from <code>output/worker_ids/&lt;video&gt;/</code>). Missing images mean no snapshot was saved for that ID.</p>
+        <div id="workerGallery"></div>
       </div>
 
       <div class="grid-charts two">
@@ -141,8 +284,9 @@
       </div>
 
       <div class="panel">
-        <h2>Time in screen quadrants (s)</h2>
-        <div class="chart-box tall"><canvas id="chartZones"></canvas></div>
+        <h2>Share of time per grid cell (heatmap, %)</h2>
+        <p class="sub" style="margin-top:0;margin-bottom:0.75rem;font-size:0.85rem;">Each cell shows what share of the person’s tracked time was spent there (sums to 100%). 8×16 bins; 16 along the wider frame side. Bbox center each frame. Overlaid on <code>web/first_frame.jpg</code> (match processed video resolution and aspect ratio).</p>
+        <div id="heatmaps"></div>
       </div>
 
       <div class="panel">
@@ -160,10 +304,6 @@
                 <th>Active s</th>
                 <th>Idle s</th>
                 <th>Move px</th>
-                <th>TL</th>
-                <th>TR</th>
-                <th>BL</th>
-                <th>BR</th>
                 <th>Pick</th>
                 <th>Lift</th>
                 <th>Rack</th>
@@ -188,6 +328,48 @@
       return parts[parts.length - 1] || p;
     }
 
+    function videoStemFromStats(data) {
+      const b = basename(data.video_path || "");
+      const dot = b.lastIndexOf(".");
+      return dot > 0 ? b.slice(0, dot) : b || "video";
+    }
+
+    function mountWorkerGallery(el, workers, videoStem) {
+      if (!el) return;
+      const sorted = [...workers].sort((a, b) => (+a.number || 0) - (+b.number || 0));
+      if (!sorted.length) {
+        el.innerHTML = '<p class="sub">No workers in stats.</p>';
+        return;
+      }
+      const stemEnc = encodeURIComponent(videoStem);
+      el.innerHTML =
+        '<div class="worker-gallery">' +
+        sorted
+          .map((w) => {
+            const n = w.number;
+            const id = String(n).padStart(4, "0");
+            const raw =
+              w.worker_image_url_path ||
+              `/media/worker_ids/${stemEnc}/worker_${id}.jpg`;
+            const src = new URL(raw, window.location.origin).href;
+            return (
+              '<div class="worker-card">' +
+              '<div class="worker-card-img-wrap">' +
+              '<img src="' +
+              src +
+              '" alt="" loading="lazy" decoding="async" onerror="this.style.display=\'none\';var p=this.nextElementSibling;if(p)p.style.display=\'flex\';" />' +
+              '<div class="worker-card-ph" style="display:none;min-height:100%;align-items:center;justify-content:center;width:100%;">No image</div>' +
+              "</div>" +
+              '<div class="worker-card-id">Worker ' +
+              n +
+              "</div>" +
+              "</div>"
+            );
+          })
+          .join("") +
+        "</div>";
+    }
+
     let charts = [];
 
     function destroyCharts() {
@@ -201,31 +383,84 @@
         active_seconds: w.active_seconds,
         idle_seconds: (w.idle_frames / (window.__fps || 30)) || 0,
         total_movement_pixels: w.movement_pixels,
-        zone_time_seconds: {
-          top_left: 0,
-          top_right: 0,
-          bottom_left: 0,
-          bottom_right: 0,
-        },
+        grid_cell_seconds: [],
       };
     }
 
-    function zoneSeconds(w) {
-      const z = workerMetrics(w).zone_time_seconds || {};
-      if (z.top_left != null || z.top_right != null || z.bottom_left != null || z.bottom_right != null) {
-        return {
-          top_left: +(z.top_left ?? 0),
-          top_right: +(z.top_right ?? 0),
-          bottom_left: +(z.bottom_left ?? 0),
-          bottom_right: +(z.bottom_right ?? 0),
-        };
+    /** Returns HTML for one .hm-grid (single heatmap). Percents are share of total seconds in all cells. */
+    function buildHeatmapGridInner(w, gridMeta) {
+      const m = workerMetrics(w);
+      const secs = m.grid_cell_seconds;
+      const rows = gridMeta.rows;
+      const cols = gridMeta.cols;
+      if (!secs || !secs.length) {
+        return `<p class="sub hm-overlay-msg">No grid data for worker ${w.number}.</p>`;
       }
-      return {
-        top_left: +(z.left ?? 0),
-        top_right: +(z.center ?? 0),
-        bottom_left: +(z.right ?? 0),
-        bottom_right: 0,
-      };
+      let totalSec = 0;
+      for (let i = 0; i < secs.length; i++) totalSec += +secs[i] || 0;
+      let maxPct = 0;
+      const cellData = [];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const v = +secs[r * cols + c] || 0;
+          const pct = totalSec > 0 ? (v / totalSec) * 100 : 0;
+          maxPct = Math.max(maxPct, pct);
+          cellData.push({ r, c, v, pct });
+        }
+      }
+      const cells = [];
+      for (const { r, c, v, pct } of cellData) {
+        const t = maxPct > 0 ? pct / maxPct : 0;
+        const a = 0.06 + t * 0.42;
+        const label =
+          pct >= 0.5 ? (pct >= 10 ? `${Math.round(pct)}%` : `${pct.toFixed(1)}%`) : "";
+        const tip = `row ${r}, col ${c}: ${pct.toFixed(2)}% of time (${v.toFixed(2)} s)`;
+        cells.push(
+          `<div class="hm-cell" title="${tip.replace(/"/g, "&quot;")}" style="background:rgba(59,142,234,${a})">${label}</div>`
+        );
+      }
+      return `<div class="hm-grid" style="grid-template-columns:repeat(${cols},minmax(0,1fr));grid-template-rows:repeat(${rows},minmax(0,1fr));">${cells.join("")}</div>`;
+    }
+
+    function mountInteractiveHeatmap(heatEl, workers, gridMeta) {
+      const buttonsHtml = workers
+        .map(
+          (w, i) =>
+            `<button type="button" class="hm-worker-btn" data-hm-idx="${i}" aria-pressed="false">W${w.number}</button>`
+        )
+        .join("");
+      heatEl.innerHTML = `
+        <div class="hm-bar">
+          <span class="hm-bar-label">Worker</span>
+          ${buttonsHtml}
+        </div>
+        <div class="hm-composite">
+          <img class="hm-bg" src="/static/first_frame.jpg" alt="" decoding="async" />
+          <div class="hm-overlay" id="hm-single"></div>
+        </div>
+        <p class="sub" style="margin:0.5rem 0 0;font-size:0.8rem;">Hover or focus a worker to load their heatmap.</p>`;
+
+      const single = heatEl.querySelector("#hm-single");
+      const btns = heatEl.querySelectorAll(".hm-worker-btn");
+
+      function show(idx) {
+        const w = workers[idx];
+        if (!w || !single) return;
+        single.innerHTML = buildHeatmapGridInner(w, gridMeta);
+        btns.forEach((b, i) => {
+          const on = i === idx;
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+          b.classList.toggle("hm-worker-btn--on", on);
+        });
+      }
+
+      btns.forEach((btn) => {
+        const idx = +btn.dataset.hmIdx;
+        btn.addEventListener("mouseenter", () => show(idx));
+        btn.addEventListener("focus", () => show(idx));
+      });
+
+      show(0);
     }
 
     function workerTasks(w) {
@@ -272,6 +507,12 @@
       const wcount = data.statistics?.worker_count ?? workers.length;
 
       metaLine.innerHTML = `<span class="badge">${wcount} tracked people</span>`;
+
+      mountWorkerGallery(
+        document.getElementById("workerGallery"),
+        workers,
+        data.worker_snapshot_stem || videoStemFromStats(data)
+      );
 
       const outBase = basename(data.output_video_path);
       const vid = document.getElementById("player");
@@ -333,33 +574,6 @@
         })
       );
 
-      const zq = workers.map(zoneSeconds);
-      const ztl = zq.map((z) => z.top_left);
-      const ztr = zq.map((z) => z.top_right);
-      const zbl = zq.map((z) => z.bottom_left);
-      const zbr = zq.map((z) => z.bottom_right);
-
-      charts.push(
-        new Chart(document.getElementById("chartZones"), {
-          type: "bar",
-          data: {
-            labels,
-            datasets: [
-              { label: "Top left", data: ztl, backgroundColor: "#6366f1", stack: "z" },
-              { label: "Top right", data: ztr, backgroundColor: "#14b8a6", stack: "z" },
-              { label: "Bottom left", data: zbl, backgroundColor: "#f59e0b", stack: "z" },
-              { label: "Bottom right", data: zbr, backgroundColor: "#ec4899", stack: "z" },
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: "#8b9cb3" } } },
-            scales: { x: { stacked: true, ...axis.x }, y: { stacked: true, ...axis.y } },
-          },
-        })
-      );
-
       const tk = workers.map(workerTasks);
       charts.push(
         new Chart(document.getElementById("chartTasks"), {
@@ -398,16 +612,11 @@
         .map((w) => {
           const m = workerMetrics(w);
           const t = workerTasks(w);
-          const z = zoneSeconds(w);
           return `<tr>
           <td><strong>${w.number}</strong></td>
           <td>${(m.active_seconds ?? 0).toFixed?.(2) ?? m.active_seconds}</td>
           <td>${(m.idle_seconds ?? 0).toFixed?.(2) ?? m.idle_seconds}</td>
           <td>${m.total_movement_pixels ?? 0}</td>
-          <td>${z.top_left.toFixed(2)}</td>
-          <td>${z.top_right.toFixed(2)}</td>
-          <td>${z.bottom_left.toFixed(2)}</td>
-          <td>${z.bottom_right.toFixed(2)}</td>
           <td>${t.pick_place_approx ?? 0}</td>
           <td>${t.lift_tray_approx ?? 0}</td>
           <td>${t.move_rack_approx ?? 0}</td>
@@ -416,7 +625,15 @@
         .join("");
 
       if (workers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11">No workers in stats.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7">No workers in stats.</td></tr>';
+      }
+
+      const gridMeta = data.statistics?.grid;
+      const heatEl = document.getElementById("heatmaps");
+      if (heatEl && gridMeta && workers.length) {
+        mountInteractiveHeatmap(heatEl, workers, gridMeta);
+      } else if (heatEl) {
+        heatEl.innerHTML = '<p class="sub">No grid data.</p>';
       }
     }
 

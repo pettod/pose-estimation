@@ -8,6 +8,7 @@ import config
 
 from . import drawing, pose
 from .h264_transcode import transcode_mp4_to_h264
+from .worker_reid import WorkerReIDManager
 
 
 def run_pipeline(input_video, pose_model, tracker, people_metrics, device):
@@ -24,6 +25,7 @@ def run_pipeline(input_video, pose_model, tracker, people_metrics, device):
         str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), config.FPS, (width, height)
     )
 
+    worker_reid = WorkerReIDManager()
     processed = 0
     pbar = tqdm(
         desc="Frames",
@@ -51,7 +53,9 @@ def run_pipeline(input_video, pose_model, tracker, people_metrics, device):
                 )
                 tracks = tracker.update_tracks(detections, frame=frame)
 
-                drawing.draw_quadrant_split_lines(frame, width, height)
+                worker_reid.process_frame(frame, tracks)
+                worker_reid.write_snapshot_images(input_path.stem)
+                drawing.draw_grid_lines(frame, width, height)
                 drawing.process_tracks_on_frame(
                     frame,
                     width,
@@ -61,6 +65,7 @@ def run_pipeline(input_video, pose_model, tracker, people_metrics, device):
                     frame_keypoints,
                     frame_kpt_conf,
                     people_metrics,
+                    worker_reid,
                 )
 
                 out.write(frame)
