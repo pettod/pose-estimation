@@ -1,5 +1,6 @@
 import math
 from collections import defaultdict
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -8,11 +9,17 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 from tqdm import tqdm
 from ultralytics import YOLO
 
+# --- Paths (project root = directory containing main.py) ---
+PROJECT_ROOT = Path(__file__).resolve().parent
+VIDEOS_DIR = PROJECT_ROOT / "videos"
+MODELS_DIR = PROJECT_ROOT / "models"
+OUTPUT_DIR = PROJECT_ROOT / "output"
+
 # --- Configuration ---
-INPUT_VIDEO = "video_short.mp4"
+INPUT_VIDEO_NAME = "video_short.mp4"
 OUTPUT_SUFFIX = "_annotated.mp4"
 
-POSE_MODEL = "yolov8l-pose.pt"
+POSE_MODEL_NAME = "yolov8l-pose.pt"
 POSE_CONF = 0.4
 FPS = 30
 WINDOW_NAME = "High-Accuracy Factory Analysis"
@@ -32,6 +39,20 @@ COCO_SKELETON = [
 
 KPT_CONF_MIN = 0.2
 IOU_MATCH_MIN = 0.1
+
+
+def path_input_video():
+    return VIDEOS_DIR / INPUT_VIDEO_NAME
+
+
+def path_pose_model():
+    return MODELS_DIR / POSE_MODEL_NAME
+
+
+def path_output_video(input_path: Path) -> Path:
+    """Annotated file in output/: e.g. video_short.mp4 -> output/video_short_annotated.mp4"""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    return OUTPUT_DIR / f"{input_path.stem}{OUTPUT_SUFFIX}"
 
 
 def new_person_metrics():
@@ -98,7 +119,13 @@ def select_inference_device():
 
 
 def load_pose_model(device):
-    model = YOLO(POSE_MODEL)
+    weights = path_pose_model()
+    if not weights.is_file():
+        raise FileNotFoundError(
+            f"Pose weights not found: {weights}\n"
+            f"Place .pt files under {MODELS_DIR}"
+        )
+    model = YOLO(str(weights))
     model.to(device)
     return model
 
@@ -344,13 +371,17 @@ def process_tracks_on_frame(
 
 
 def run_pipeline(input_video, pose_model, tracker, people_metrics, device):
-    output_video = input_video.replace(".mp4", OUTPUT_SUFFIX)
-    cap = cv2.VideoCapture(input_video)
+    input_path = Path(input_video)
+    output_path = path_output_video(input_path)
+    print(f"Input:  {input_path}")
+    print(f"Output: {output_path}")
+
+    cap = cv2.VideoCapture(str(input_path))
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     out = cv2.VideoWriter(
-        output_video, cv2.VideoWriter_fourcc(*"mp4v"), FPS, (width, height)
+        str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), FPS, (width, height)
     )
 
     processed = 0
@@ -411,10 +442,17 @@ def main():
     device = select_inference_device()
     print(f"Inference device: {device}")
 
+    input_path = path_input_video()
+    if not input_path.is_file():
+        raise FileNotFoundError(
+            f"Input video not found: {input_path}\n"
+            f"Place .mp4 files under {VIDEOS_DIR}"
+        )
+
     people_metrics = defaultdict(new_person_metrics)
     pose_model = load_pose_model(device)
     tracker = create_tracker()
-    run_pipeline(INPUT_VIDEO, pose_model, tracker, people_metrics, device)
+    run_pipeline(input_path, pose_model, tracker, people_metrics, device)
     print_productivity_report(people_metrics, FPS)
 
 
