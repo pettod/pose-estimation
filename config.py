@@ -19,6 +19,7 @@ SHOW_PREVIEW = False
 # Active/idle (joint motion + hysteresis; scales pick/lift/move thresholds)
 ACTIVITY_THRESHOLD = 0.4  # lower = need more motion to count as active
 IDLE_STREAK_FRAMES = 30  # consecutive low-activity frames before showing IDLE
+TRAIL_LENGTH_FRAMES = 30  # bbox-center path length (overlay)
 ACTIVITY_KPT_CONF_MIN = 0.25  # keypoint visibility for wrist/torso activity checks
 
 KPT_L_WRIST, KPT_R_WRIST = 9, 10

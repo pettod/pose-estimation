@@ -6,6 +6,16 @@ import config
 from . import geometry, metrics, pose
 
 
+def draw_position_trail(frame, trail, track_color_bgr):
+    """Filled dots only at last N bbox centers (no lines, no borders)."""
+    if not trail:
+        return
+    b, g, r = track_color_bgr
+    color = (min(255, b + 40), min(255, g + 40), min(255, r + 40))
+    for pt in trail:
+        cv2.circle(frame, pt, 3, color, -1, cv2.LINE_AA)
+
+
 def draw_quadrant_split_lines(frame, frame_width, frame_height):
     """Vertical + horizontal midlines (2×2 screen quadrants)."""
     w, h = frame_width, frame_height
@@ -96,6 +106,7 @@ def process_tracks_on_frame(
         )
 
         m = people_metrics[track_id]
+        metrics.record_position_trail(m, cx, cy)
         move_dist = metrics.update_movement_distance(m, (cx, cy))
         metrics.record_zone_frame(m, cx, cy, frame_width, frame_height)
         current_status = metrics.evaluate_activity_and_update_metrics(
@@ -104,6 +115,7 @@ def process_tracks_on_frame(
         zone_key = config.floor_zone_key(cx, cy, frame_width, frame_height)
 
         draw_pose_skeleton(frame, kpts, kconf, box_color)
+        draw_position_trail(frame, list(m["position_trail"]), box_color)
         draw_worker_labels(
             frame,
             x1,

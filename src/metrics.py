@@ -1,4 +1,5 @@
 """Per-person activity: joint motion + hysteresis ACTIVE/IDLE (YOLOv8 pose)."""
+from collections import deque
 from typing import Literal
 
 import config
@@ -24,6 +25,7 @@ def new_person_metrics():
         "last_pos": None,
         "prev_wrist_dist": None,
         "idle_streak": config.IDLE_STREAK_FRAMES,
+        "position_trail": deque(maxlen=config.TRAIL_LENGTH_FRAMES),
     }
 
 
@@ -40,6 +42,10 @@ def record_zone_frame(metrics, cx, cy, frame_width, frame_height):
     z = config.floor_zone_key(cx, cy, frame_width, frame_height)
     if z in metrics["zone_frames"]:
         metrics["zone_frames"][z] += 1
+
+
+def record_position_trail(metrics, cx, cy):
+    metrics["position_trail"].append((int(cx), int(cy)))
 
 
 def _activity_kpt_ok(kpts, kconf, idx):
