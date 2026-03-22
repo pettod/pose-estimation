@@ -1,9 +1,10 @@
-"""Device selection, YOLO weights, DeepSort tracker."""
+"""Device selection, YOLO weights, SORT tracker."""
 import torch
-from deep_sort_realtime.deepsort_tracker import DeepSort
 from ultralytics import YOLO
 
 import config
+
+from .sort_tracker import SortTrackerAdapter
 
 
 def select_inference_device():
@@ -29,4 +30,5 @@ def load_pose_model(device):
 
 
 def create_tracker():
-    return DeepSort(max_age=30, n_init=3, nms_max_overlap=0.5)
+    """SORT (Kalman bbox + IoU), no appearance model. Tuned like prior DeepSort age/init."""
+    return SortTrackerAdapter(max_age=30, min_hits=3, iou_threshold=0.3)

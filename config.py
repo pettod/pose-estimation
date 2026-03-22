@@ -14,12 +14,12 @@ POSE_MODEL_NAME = "yolov8l-pose.pt"
 POSE_CONF = 0.4
 FPS = 30
 WINDOW_NAME = "High-Accuracy Factory Analysis"
-SHOW_PREVIEW = True
+SHOW_PREVIEW = False
 
-# Active/idle (YOLOv8l-Pose biomechanics)
-GLOBAL_DISPLACEMENT_PX = 5.0  # bbox centroid motion vs last frame (floor movement)
-WRIST_EXTENSION_DELTA_PX = 3.5  # |Δ| mean wrist–torso extension → pick/place
-IDLE_STREAK_FRAMES = 30  # consecutive non-active frames before IDLE (anti-flicker)
+# Active/idle (joint motion + hysteresis; scales pick/lift/move thresholds)
+ACTIVITY_THRESHOLD = 0.4  # lower = need more motion to count as active
+IDLE_STREAK_FRAMES = 30  # consecutive low-activity frames before showing IDLE
+ACTIVITY_KPT_CONF_MIN = 0.25  # keypoint visibility for wrist/torso activity checks
 
 KPT_L_WRIST, KPT_R_WRIST = 9, 10
 KPT_L_SHOULDER, KPT_R_SHOULDER = 5, 6
@@ -30,7 +30,7 @@ COCO_SKELETON = [
     (5, 11), (6, 12), (11, 12), (11, 13), (13, 15), (12, 14), (14, 16),
 ]
 
-KPT_CONF_MIN = 0.2
+KPT_CONF_MIN = 0.2  # skeleton overlay; activity uses ACTIVITY_KPT_CONF_MIN
 IOU_MATCH_MIN = 0.1
 
 # Screen quadrants (time-in-area): bbox center in image space, not world position.

@@ -1,4 +1,4 @@
-"""YOLO pose results → DeepSort detections + keypoint IoU matching.
+"""YOLO pose results → SORT detections + keypoint IoU matching.
 
 Keypoints: one .cpu().numpy() per tensor per frame (MPS-friendly; avoid per-detection sync).
 """
@@ -11,7 +11,7 @@ from . import geometry
 
 def build_pose_detections(pose_result):
     """
-    From one frame's YOLO pose Results, build DeepSort detections and parallel
+    From one frame's YOLO pose Results, build SORT detections and parallel
     keypoint lists for IoU matching.
     """
     detections = []
