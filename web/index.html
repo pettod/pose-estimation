@@ -211,13 +211,51 @@
       text-align: center;
       line-height: 1.1;
     }
+    .worker-gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 1rem;
+    }
+    .worker-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.25);
+    }
+    .worker-card-img-wrap {
+      aspect-ratio: 3 / 4;
+      background: var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .worker-card-img-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .worker-card-id {
+      padding: 0.5rem 0.6rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-align: center;
+      color: var(--text);
+    }
+    .worker-card-ph {
+      color: var(--muted);
+      font-size: 0.75rem;
+      padding: 0.5rem;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="header">
       <h1>Factory floor analytics</h1>
-      <p class="sub" id="metaLine">Pose tracking + SORT · supplementary metrics</p>
+      <p class="sub" id="metaLine">Pose tracking + worker re-ID · supplementary metrics</p>
     </div>
 
     <div id="errorBox" class="panel err" style="display: none;"></div>
@@ -226,6 +264,12 @@
       <div class="panel">
         <h2>Annotated video</h2>
         <video id="player" controls playsinline></video>
+      </div>
+
+      <div class="panel">
+        <h2>Worker snapshots</h2>
+        <p class="sub" style="margin-top:0;margin-bottom:0.75rem;font-size:0.85rem;">First bbox crop per logical worker ID (from <code>output/worker_ids/&lt;video&gt;/</code>). Missing images mean no snapshot was saved for that ID.</p>
+        <div id="workerGallery"></div>
       </div>
 
       <div class="grid-charts two">
@@ -282,6 +326,48 @@
       if (!p) return "";
       const parts = p.replace(/\\/g, "/").split("/");
       return parts[parts.length - 1] || p;
+    }
+
+    function videoStemFromStats(data) {
+      const b = basename(data.video_path || "");
+      const dot = b.lastIndexOf(".");
+      return dot > 0 ? b.slice(0, dot) : b || "video";
+    }
+
+    function mountWorkerGallery(el, workers, videoStem) {
+      if (!el) return;
+      const sorted = [...workers].sort((a, b) => (+a.number || 0) - (+b.number || 0));
+      if (!sorted.length) {
+        el.innerHTML = '<p class="sub">No workers in stats.</p>';
+        return;
+      }
+      const stemEnc = encodeURIComponent(videoStem);
+      el.innerHTML =
+        '<div class="worker-gallery">' +
+        sorted
+          .map((w) => {
+            const n = w.number;
+            const id = String(n).padStart(4, "0");
+            const raw =
+              w.worker_image_url_path ||
+              `/media/worker_ids/${stemEnc}/worker_${id}.jpg`;
+            const src = new URL(raw, window.location.origin).href;
+            return (
+              '<div class="worker-card">' +
+              '<div class="worker-card-img-wrap">' +
+              '<img src="' +
+              src +
+              '" alt="" loading="lazy" decoding="async" onerror="this.style.display=\'none\';var p=this.nextElementSibling;if(p)p.style.display=\'flex\';" />' +
+              '<div class="worker-card-ph" style="display:none;min-height:100%;align-items:center;justify-content:center;width:100%;">No image</div>' +
+              "</div>" +
+              '<div class="worker-card-id">Worker ' +
+              n +
+              "</div>" +
+              "</div>"
+            );
+          })
+          .join("") +
+        "</div>";
     }
 
     let charts = [];
@@ -421,6 +507,12 @@
       const wcount = data.statistics?.worker_count ?? workers.length;
 
       metaLine.innerHTML = `<span class="badge">${wcount} tracked people</span>`;
+
+      mountWorkerGallery(
+        document.getElementById("workerGallery"),
+        workers,
+        data.worker_snapshot_stem || videoStemFromStats(data)
+      );
 
       const outBase = basename(data.output_video_path);
       const vid = document.getElementById("player");

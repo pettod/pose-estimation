@@ -52,6 +52,9 @@ def _write_stats_json(people_metrics, fps, input_video_path: Path):
     fw, fh = _read_video_dimensions(input_video_path)
     grid_rows, grid_cols = config.grid_dimensions_for_frame(fw, fh)
 
+    video_stem = input_video_path.stem
+    snap_dir = config.path_worker_id_images_dir(video_stem)
+
     workers = []
     for tid, m in sorted(people_metrics.items()):
         active_sec = m["active_frames"] / fps
@@ -63,9 +66,15 @@ def _write_stats_json(people_metrics, fps, input_video_path: Path):
         except (TypeError, ValueError):
             number = tid
         t = m["tasks"]
+        snap_name = f"worker_{number:04d}.jpg"
+        snap_file = snap_dir / snap_name
+        worker_image_path = str(snap_file.resolve())
+        worker_image_url_path = f"/media/worker_ids/{video_stem}/{snap_name}"
         workers.append(
             {
                 "number": number,
+                "worker_image_path": worker_image_path,
+                "worker_image_url_path": worker_image_url_path,
                 "metrics": {
                     "active_seconds": round(active_sec, 2),
                     "idle_seconds": round(idle_sec, 2),
@@ -89,6 +98,7 @@ def _write_stats_json(people_metrics, fps, input_video_path: Path):
         "video_path": str(input_video_path),
         "output_video_path": str(output_video_path),
         "fps": fps,
+        "worker_snapshot_stem": video_stem,
         "statistics": {
             "worker_count": len(workers),
             "workers": workers,

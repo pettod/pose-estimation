@@ -48,6 +48,26 @@ async def serve_output_video(name: str):
     return FileResponse(path, media_type="video/mp4")
 
 
+@app.get("/media/worker_ids/{stem}/{filename}")
+async def serve_worker_id_image(stem: str, filename: str):
+    """Serve worker crop JPEGs from output/worker_ids/<stem>/ (basename only)."""
+    safe_stem = Path(stem).name
+    safe_name = Path(filename).name
+    if safe_stem != stem or safe_name != filename:
+        raise HTTPException(status_code=404)
+    if not safe_name.startswith("worker_") or not safe_name.endswith(".jpg"):
+        raise HTTPException(status_code=404)
+    path = (config.OUTPUT_DIR / "worker_ids" / safe_stem / safe_name).resolve()
+    root = (config.OUTPUT_DIR / "worker_ids").resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=404)
+    if not path.is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/jpeg")
+
+
 app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
 

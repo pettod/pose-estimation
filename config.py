@@ -34,6 +34,9 @@ COCO_SKELETON = [
 KPT_CONF_MIN = 0.2  # skeleton overlay; activity uses ACTIVITY_KPT_CONF_MIN
 IOU_MATCH_MIN = 0.1
 
+# Re-ID: cosine similarity between DinoV2 embeddings (disappeared vs new track crop).
+WORKER_SIMILARITY_THRESHOLD = 0.5
+
 # Screen grid (time-in-cell): 8×16 cells; 16 bins along the wider frame side.
 GRID_BINS_WIDE = 16
 GRID_BINS_NARROW = 8
@@ -79,3 +82,10 @@ def path_pose_model():
 def path_output_video(input_path: Path) -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     return OUTPUT_DIR / f"{input_path.stem}{OUTPUT_SUFFIX}"
+
+
+def path_worker_id_images_dir(video_stem: str) -> Path:
+    """Directory for first-frame bbox crops when a new track ID appears."""
+    d = OUTPUT_DIR / "worker_ids" / video_stem
+    d.mkdir(parents=True, exist_ok=True)
+    return d

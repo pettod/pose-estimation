@@ -5,7 +5,6 @@ import config
 
 from . import geometry, metrics, pose
 
-
 def draw_position_trail(frame, trail, track_color_bgr):
     """Filled dots only at last N bbox centers (no lines, no borders)."""
     if not trail:
@@ -92,22 +91,24 @@ def process_tracks_on_frame(
     frame_keypoints,
     frame_kpt_conf,
     people_metrics,
+    worker_reid,
 ):
     for track in tracks:
         if not track.is_confirmed():
             continue
 
-        track_id = track.track_id
+        byte_id = int(track.track_id)
+        worker_id = worker_reid.logical_id_for_byte(byte_id)
         ltrb = track.to_ltrb()
         x1, y1, x2, y2 = map(int, ltrb)
         cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-        box_color = geometry.color_bgr_for_track(track_id)
+        box_color = geometry.color_bgr_for_track(worker_id)
 
         kpts, kconf = pose.match_keypoints_to_track_box(
             x1, y1, x2, y2, det_xyxy, frame_keypoints, frame_kpt_conf
         )
 
-        m = people_metrics[track_id]
+        m = people_metrics[worker_id]
         metrics.record_position_trail(m, cx, cy)
         move_dist = metrics.update_movement_distance(m, (cx, cy))
         metrics.record_grid_cell(m, cx, cy, frame_width, frame_height)
@@ -124,7 +125,7 @@ def process_tracks_on_frame(
             y1,
             x2,
             y2,
-            track_id,
+            worker_id,
             box_color,
             current_status,
             m["total_dist"],
