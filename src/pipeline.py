@@ -51,7 +51,7 @@ def run_pipeline(input_video, pose_model, tracker, people_metrics, device):
                 )
                 tracks = tracker.update_tracks(detections, frame=frame)
 
-                drawing.draw_quadrant_split_lines(frame, width, height)
+                drawing.draw_grid_lines(frame, width, height)
                 drawing.process_tracks_on_frame(
                     frame,
                     width,

@@ -21,7 +21,7 @@ def new_person_metrics():
         "idle_frames": 0,
         "total_dist": 0,
         "tasks": {"pick_place": 0, "lift_tray": 0, "move_rack": 0},
-        "zone_frames": {k: 0 for k in config.FLOOR_ZONE_KEYS},
+        "grid_cell_frames": [0] * config.GRID_CELL_COUNT,
         "last_pos": None,
         "prev_wrist_dist": None,
         "idle_streak": config.IDLE_STREAK_FRAMES,
@@ -38,10 +38,9 @@ def update_movement_distance(metrics, curr_pos):
     return move_dist
 
 
-def record_zone_frame(metrics, cx, cy, frame_width, frame_height):
-    z = config.floor_zone_key(cx, cy, frame_width, frame_height)
-    if z in metrics["zone_frames"]:
-        metrics["zone_frames"][z] += 1
+def record_grid_cell(metrics, cx, cy, frame_width, frame_height):
+    idx, _, _ = config.grid_cell_index(cx, cy, frame_width, frame_height)
+    metrics["grid_cell_frames"][idx] += 1
 
 
 def record_position_trail(metrics, cx, cy):

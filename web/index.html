@@ -112,6 +112,37 @@
       font-size: 0.75rem;
       margin-left: 0.35rem;
     }
+    .hm-work { margin-bottom: 1rem; }
+    .hm-work:last-child { margin-bottom: 0; }
+    .hm-title {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 0.4rem;
+      font-weight: 600;
+    }
+    .hm-grid {
+      display: grid;
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      width: 100%;
+      max-width: 640px;
+    }
+    .hm-cell {
+      min-height: 8px;
+      min-width: 0;
+      background: rgba(59, 142, 234, 0.08);
+      font-size: clamp(0.45rem, 1.1vw, 0.65rem);
+      color: rgba(232, 237, 245, 0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1px;
+      text-align: center;
+      line-height: 1.1;
+    }
   </style>
 </head>
 <body>
@@ -141,8 +172,9 @@
       </div>
 
       <div class="panel">
-        <h2>Time in screen quadrants (s)</h2>
-        <div class="chart-box tall"><canvas id="chartZones"></canvas></div>
+        <h2>Time per grid cell (heatmap, seconds)</h2>
+        <p class="sub" style="margin-top:0;margin-bottom:0.75rem;font-size:0.85rem;">8×16 bins; 16 along the wider frame side. Bbox center each frame.</p>
+        <div id="heatmaps"></div>
       </div>
 
       <div class="panel">
@@ -160,10 +192,6 @@
                 <th>Active s</th>
                 <th>Idle s</th>
                 <th>Move px</th>
-                <th>TL</th>
-                <th>TR</th>
-                <th>BL</th>
-                <th>BR</th>
                 <th>Pick</th>
                 <th>Lift</th>
                 <th>Rack</th>
@@ -201,31 +229,33 @@
         active_seconds: w.active_seconds,
         idle_seconds: (w.idle_frames / (window.__fps || 30)) || 0,
         total_movement_pixels: w.movement_pixels,
-        zone_time_seconds: {
-          top_left: 0,
-          top_right: 0,
-          bottom_left: 0,
-          bottom_right: 0,
-        },
+        grid_cell_seconds: [],
       };
     }
 
-    function zoneSeconds(w) {
-      const z = workerMetrics(w).zone_time_seconds || {};
-      if (z.top_left != null || z.top_right != null || z.bottom_left != null || z.bottom_right != null) {
-        return {
-          top_left: +(z.top_left ?? 0),
-          top_right: +(z.top_right ?? 0),
-          bottom_left: +(z.bottom_left ?? 0),
-          bottom_right: +(z.bottom_right ?? 0),
-        };
+    function buildWorkerHeatmap(w, gridMeta) {
+      const m = workerMetrics(w);
+      const secs = m.grid_cell_seconds;
+      if (!secs || !secs.length) {
+        return `<div class="hm-work"><div class="hm-title">Worker ${w.number}</div><p class="sub">No grid data.</p></div>`;
       }
-      return {
-        top_left: +(z.left ?? 0),
-        top_right: +(z.center ?? 0),
-        bottom_left: +(z.right ?? 0),
-        bottom_right: 0,
-      };
+      const rows = gridMeta.rows;
+      const cols = gridMeta.cols;
+      let max = 0;
+      for (let i = 0; i < secs.length; i++) max = Math.max(max, +secs[i] || 0);
+      const cells = [];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const v = +secs[r * cols + c] || 0;
+          const t = max > 0 ? v / max : 0;
+          const a = 0.1 + t * 0.9;
+          const label = v >= 0.05 ? v.toFixed(1) : "";
+          cells.push(
+            `<div class="hm-cell" title="row ${r}, col ${c}: ${v.toFixed(2)} s" style="background:rgba(59,142,234,${a})">${label}</div>`
+          );
+        }
+      }
+      return `<div class="hm-work"><div class="hm-title">Worker ${w.number}</div><div class="hm-grid" style="grid-template-columns:repeat(${cols},minmax(0,1fr));grid-template-rows:repeat(${rows},minmax(0,1fr));aspect-ratio:${cols} / ${rows};">${cells.join("")}</div></div>`;
     }
 
     function workerTasks(w) {
@@ -333,33 +363,6 @@
         })
       );
 
-      const zq = workers.map(zoneSeconds);
-      const ztl = zq.map((z) => z.top_left);
-      const ztr = zq.map((z) => z.top_right);
-      const zbl = zq.map((z) => z.bottom_left);
-      const zbr = zq.map((z) => z.bottom_right);
-
-      charts.push(
-        new Chart(document.getElementById("chartZones"), {
-          type: "bar",
-          data: {
-            labels,
-            datasets: [
-              { label: "Top left", data: ztl, backgroundColor: "#6366f1", stack: "z" },
-              { label: "Top right", data: ztr, backgroundColor: "#14b8a6", stack: "z" },
-              { label: "Bottom left", data: zbl, backgroundColor: "#f59e0b", stack: "z" },
-              { label: "Bottom right", data: zbr, backgroundColor: "#ec4899", stack: "z" },
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: "#8b9cb3" } } },
-            scales: { x: { stacked: true, ...axis.x }, y: { stacked: true, ...axis.y } },
-          },
-        })
-      );
-
       const tk = workers.map(workerTasks);
       charts.push(
         new Chart(document.getElementById("chartTasks"), {
@@ -398,16 +401,11 @@
         .map((w) => {
           const m = workerMetrics(w);
           const t = workerTasks(w);
-          const z = zoneSeconds(w);
           return `<tr>
           <td><strong>${w.number}</strong></td>
           <td>${(m.active_seconds ?? 0).toFixed?.(2) ?? m.active_seconds}</td>
           <td>${(m.idle_seconds ?? 0).toFixed?.(2) ?? m.idle_seconds}</td>
           <td>${m.total_movement_pixels ?? 0}</td>
-          <td>${z.top_left.toFixed(2)}</td>
-          <td>${z.top_right.toFixed(2)}</td>
-          <td>${z.bottom_left.toFixed(2)}</td>
-          <td>${z.bottom_right.toFixed(2)}</td>
           <td>${t.pick_place_approx ?? 0}</td>
           <td>${t.lift_tray_approx ?? 0}</td>
           <td>${t.move_rack_approx ?? 0}</td>
@@ -416,7 +414,17 @@
         .join("");
 
       if (workers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11">No workers in stats.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7">No workers in stats.</td></tr>';
+      }
+
+      const gridMeta = data.statistics?.grid;
+      const heatEl = document.getElementById("heatmaps");
+      if (heatEl && gridMeta && workers.length) {
+        heatEl.innerHTML = workers
+          .map((w) => buildWorkerHeatmap(w, gridMeta))
+          .join("");
+      } else if (heatEl) {
+        heatEl.innerHTML = '<p class="sub">No grid data.</p>';
       }
     }
 

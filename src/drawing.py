@@ -1,4 +1,4 @@
-"""OpenCV overlays: quadrant split lines, skeleton, per-person HUD."""
+"""OpenCV overlays: grid lines, skeleton, per-person HUD."""
 import cv2
 
 import config
@@ -16,14 +16,17 @@ def draw_position_trail(frame, trail, track_color_bgr):
         cv2.circle(frame, pt, 3, color, -1, cv2.LINE_AA)
 
 
-def draw_quadrant_split_lines(frame, frame_width, frame_height):
-    """Vertical + horizontal midlines (2×2 screen quadrants)."""
+def draw_grid_lines(frame, frame_width, frame_height):
+    """8×16 grid (16 divisions on wider side); light lines."""
     w, h = frame_width, frame_height
-    mx = w // 2
-    my = h // 2
-    color = (60, 60, 72)
-    cv2.line(frame, (mx, 0), (mx, h), color, 1)
-    cv2.line(frame, (0, my), (w, my), color, 1)
+    rows, cols = config.grid_dimensions_for_frame(frame_width, frame_height)
+    color = (48, 48, 58)
+    for c in range(1, cols):
+        x = int(c * w / cols)
+        cv2.line(frame, (x, 0), (x, h), color, 1)
+    for r in range(1, rows):
+        y = int(r * h / rows)
+        cv2.line(frame, (0, y), (w, y), color, 1)
 
 
 def draw_pose_skeleton(frame, kpts, kconf, box_color):
@@ -55,7 +58,7 @@ def draw_worker_labels(
     box_color,
     current_status,
     total_dist,
-    zone_key,
+    location_label,
 ):
     cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
 
@@ -64,8 +67,7 @@ def draw_worker_labels(
 
     font = cv2.FONT_HERSHEY_SIMPLEX
     s1, t1 = 0.48, 1
-    zlabel = config.FLOOR_ZONE_LABELS.get(zone_key, zone_key)
-    line1 = f"{current_status} | ID {track_id} | {int(total_dist)}px | {zlabel}"
+    line1 = f"{current_status} | ID {track_id} | {int(total_dist)}px | {location_label}"
 
     (lw1, lh1), b1 = cv2.getTextSize(line1, font, s1, t1)
     pad = 4
@@ -108,11 +110,11 @@ def process_tracks_on_frame(
         m = people_metrics[track_id]
         metrics.record_position_trail(m, cx, cy)
         move_dist = metrics.update_movement_distance(m, (cx, cy))
-        metrics.record_zone_frame(m, cx, cy, frame_width, frame_height)
+        metrics.record_grid_cell(m, cx, cy, frame_width, frame_height)
         current_status = metrics.evaluate_activity_and_update_metrics(
             m, kpts, kconf, frame_height, cx, cy, move_dist
         )
-        zone_key = config.floor_zone_key(cx, cy, frame_width, frame_height)
+        location_label = config.grid_location_label(cx, cy, frame_width, frame_height)
 
         draw_pose_skeleton(frame, kpts, kconf, box_color)
         draw_position_trail(frame, list(m["position_trail"]), box_color)
@@ -126,5 +128,5 @@ def process_tracks_on_frame(
             box_color,
             current_status,
             m["total_dist"],
-            zone_key,
+            location_label,
         )
