@@ -7,6 +7,7 @@ from tqdm import tqdm
 import config
 
 from . import drawing, pose
+from .h264_transcode import transcode_mp4_to_h264
 
 
 def run_pipeline(input_video, pose_model, tracker, people_metrics, device):
@@ -77,3 +78,5 @@ def run_pipeline(input_video, pose_model, tracker, people_metrics, device):
         out.release()
         if config.SHOW_PREVIEW:
             cv2.destroyAllWindows()
+        if processed:
+            transcode_mp4_to_h264(output_path)

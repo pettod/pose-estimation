@@ -7,14 +7,14 @@ MODELS_DIR = PROJECT_ROOT / "models"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 STATS_JSON_PATH = PROJECT_ROOT / "stats.json"
 
-INPUT_VIDEO_NAME = "video_medium.mp4"
+INPUT_VIDEO_NAME = "video_short.mp4"
 OUTPUT_SUFFIX = "_annotated.mp4"
 
 POSE_MODEL_NAME = "yolov8l-pose.pt"
 POSE_CONF = 0.4
 FPS = 30
 WINDOW_NAME = "High-Accuracy Factory Analysis"
-SHOW_PREVIEW = True
+SHOW_PREVIEW = False
 
 # Active/idle (joint motion + hysteresis; scales pick/lift/move thresholds)
 ACTIVITY_THRESHOLD = 0.4  # lower = need more motion to count as active
