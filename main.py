@@ -8,8 +8,15 @@ import math
 
 input_video = "video_short.mp4"
 POSE_CONF = 0.5
-# COCO pose: right wrist index (same idea as MediaPipe pick-place heuristic)
-KPT_RIGHT_WRIST = 10
+
+# Activity / idle (joint motion + hysteresis)
+ACTIVITY_THRESHOLD = 0.5  # scales pick/lift/move thresholds; lower = need more motion
+IDLE_FRAME_LIMIT = 30  # consecutive low-activity frames before showing IDLE
+
+# COCO keypoints: 9=L_Wrist, 10=R_Wrist, 5=L_Shoulder, 6=R_Shoulder, 11=L_Hip, 12=R_Hip
+KPT_L_WRIST, KPT_R_WRIST = 9, 10
+KPT_L_SHOULDER, KPT_R_SHOULDER = 5, 6
+KPT_L_HIP, KPT_R_HIP = 11, 12
 
 # COCO 17 keypoint skeleton (excluding face detail)
 COCO_SKELETON = [
@@ -23,14 +30,19 @@ COCO_SKELETON = [
 pose_model = YOLO("yolov8m-pose.pt")
 tracker = DeepSort(max_age=30, n_init=3, nms_max_overlap=0.5)
 
-# Metrics Storage
-people_metrics = defaultdict(lambda: {
-    "active_frames": 0,
-    "idle_frames": 0,
-    "total_dist": 0,
-    "tasks": {"pick_place": 0, "move_rack": 0},
-    "last_pos": None
-})
+def _new_person_metrics():
+    return {
+        "active_frames": 0,
+        "idle_frames": 0,
+        "total_dist": 0,
+        "tasks": {"pick_place": 0, "move_rack": 0},
+        "last_pos": None,
+        "prev_wrist_dist": None,
+        "idle_streak": IDLE_FRAME_LIMIT,  # start IDLE until sustained activity
+    }
+
+
+people_metrics = defaultdict(_new_person_metrics)
 
 def get_dist(p1, p2):
     return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)
@@ -142,25 +154,71 @@ while cap.isOpened():
                 kpts = frame_keypoints[best_j]
                 kconf = frame_kpt_conf[best_j] if best_j < len(frame_kpt_conf) else None
 
-        # Task inference: right wrist height relative to torso bbox (COCO kpt 10)
-        if kpts is not None and kpts.shape[0] > KPT_RIGHT_WRIST:
-            wx, wy = float(kpts[KPT_RIGHT_WRIST][0]), float(kpts[KPT_RIGHT_WRIST][1])
-            bh = max(1, y2 - y1)
-            rwrist_y_norm = (wy - y1) / bh
-            wrist_ok = (kconf is None) or (kconf[KPT_RIGHT_WRIST] > 0.25)
-            if wrist_ok and 0.4 < rwrist_y_norm < 0.8:
-                people_metrics[track_id]["tasks"]["pick_place"] += 1
-
-        # Movement metrics
         curr_pos = (cx, cy)
-        if people_metrics[track_id]["last_pos"]:
-            move_dist = get_dist(curr_pos, people_metrics[track_id]["last_pos"])
+        last = people_metrics[track_id]["last_pos"]
+        move_dist = get_dist(curr_pos, last) if last else 0.0
+        if last:
             people_metrics[track_id]["total_dist"] += move_dist
-            if move_dist > 2:
-                people_metrics[track_id]["active_frames"] += 1
-            else:
-                people_metrics[track_id]["idle_frames"] += 1
         people_metrics[track_id]["last_pos"] = curr_pos
+
+        th_scale = 0.5 / max(ACTIVITY_THRESHOLD, 0.05)
+        wrist_activity = 0.0
+        is_picking = False
+        is_lifting = False
+        is_moving_rack = move_dist > 5.0 * th_scale
+
+        def kpt_ok(idx):
+            if kpts is None or kpts.shape[0] <= idx:
+                return False
+            if kconf is not None and kconf[idx] <= 0.25:
+                return False
+            return kpts[idx][0] > 0 and kpts[idx][1] > 0
+
+        if (
+            kpts is not None
+            and kpt_ok(KPT_R_WRIST)
+            and kpt_ok(KPT_L_WRIST)
+            and kpt_ok(KPT_L_HIP)
+            and kpt_ok(KPT_R_HIP)
+        ):
+            r_wrist = kpts[KPT_R_WRIST]
+            l_wrist = kpts[KPT_L_WRIST]
+            torso_center = (kpts[KPT_L_HIP] + kpts[KPT_R_HIP]) / 2.0
+            dist_r = get_dist(r_wrist[:2], torso_center[:2])
+            prev = people_metrics[track_id]["prev_wrist_dist"]
+            if prev is not None:
+                wrist_activity = abs(dist_r - prev)
+            people_metrics[track_id]["prev_wrist_dist"] = dist_r
+
+            is_picking = wrist_activity > 3.0 * th_scale and cy > height * 0.4
+            if kpt_ok(KPT_L_SHOULDER) and kpt_ok(KPT_R_SHOULDER):
+                is_lifting = (
+                    r_wrist[1] < kpts[KPT_L_SHOULDER][1]
+                    or l_wrist[1] < kpts[KPT_R_SHOULDER][1]
+                ) and wrist_activity > 5.0 * th_scale
+        else:
+            people_metrics[track_id]["prev_wrist_dist"] = None
+
+        frame_active = is_picking or is_lifting or is_moving_rack
+        if frame_active:
+            people_metrics[track_id]["idle_streak"] = 0
+            people_metrics[track_id]["active_frames"] += 1
+            current_status = "ACTIVE"
+            if is_picking:
+                people_metrics[track_id]["tasks"]["pick_place"] += 1
+            if is_moving_rack:
+                people_metrics[track_id]["tasks"]["move_rack"] += 1
+        else:
+            people_metrics[track_id]["idle_streak"] += 1
+            people_metrics[track_id]["idle_frames"] += 1
+            if people_metrics[track_id]["idle_streak"] >= IDLE_FRAME_LIMIT:
+                current_status = "IDLE"
+            else:
+                current_status = "ACTIVE"
+
+        # Status pill: green bg when ACTIVE, gray when IDLE; label always white (BGR)
+        status_bg = (0, 180, 0) if current_status == "ACTIVE" else (110, 110, 110)
+        status_text_color = (255, 255, 255)
 
         # Draw keypoints & skeleton (full frame coords)
         if kpts is not None:
@@ -180,9 +238,28 @@ while cap.isOpened():
                     cv2.line(frame, (ax, ay), (bx, by), box_color, 2)
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-        label = f"Worker {track_id} | Dist: {int(people_metrics[track_id]['total_dist'])}px"
+        font_top = cv2.FONT_HERSHEY_SIMPLEX
+        scale_top = 0.5
+        thick_top = 2
+        y_top = y1 - 10
+        rest_top = (
+            f" | Worker {track_id} | "
+            f"Dist: {int(people_metrics[track_id]['total_dist'])}px"
+        )
+        (sw, sh), baseline = cv2.getTextSize(
+            current_status, font_top, scale_top, thick_top
+        )
+        pad = 4
+        bg_x1 = max(0, x1 - pad)
+        bg_y1 = max(0, y_top - sh - pad)
+        bg_x2 = x1 + sw + pad
+        bg_y2 = y_top + baseline + pad
+        cv2.rectangle(frame, (bg_x1, bg_y1), (bg_x2, bg_y2), status_bg, thickness=-1)
         cv2.putText(
-            frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 2
+            frame, current_status, (x1, y_top), font_top, scale_top, status_text_color, thick_top
+        )
+        cv2.putText(
+            frame, rest_top, (x1 + sw, y_top), font_top, scale_top, box_color, thick_top
         )
 
     cv2.imshow("High-Accuracy Factory Analysis", frame)
@@ -205,4 +282,4 @@ for tid, m in people_metrics.items():
     print(f"Worker {tid}:")
     print(f" - Movement: {int(m['total_dist'])} pixels")
     print(f" - Productivity Score: {active_sec:.1f}s active")
-    print(f" - Tasks: {m['tasks']['pick_place'] // 10} items packed")
+    print(f" - Tasks: pick_place ~{m['tasks']['pick_place'] // 10}, move_rack ~{m['tasks']['move_rack'] // 10}")
