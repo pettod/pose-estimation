@@ -5,18 +5,20 @@ import cv2
 import numpy as np
 import torch
 from deep_sort_realtime.deepsort_tracker import DeepSort
+from tqdm import tqdm
 from ultralytics import YOLO
 
 # --- Configuration ---
 INPUT_VIDEO = "video_short.mp4"
-OUTPUT_SUFFIX = "_analyzed.mp4"
+OUTPUT_SUFFIX = "_annotated.mp4"
 
 POSE_MODEL = "yolov8l-pose.pt"
 POSE_CONF = 0.4
 FPS = 30
 WINDOW_NAME = "High-Accuracy Factory Analysis"
+SHOW_PREVIEW = True
 
-ACTIVITY_THRESHOLD = 0.5
+ACTIVITY_THRESHOLD = 0.45
 IDLE_FRAME_LIMIT = 30
 
 KPT_L_WRIST, KPT_R_WRIST = 9, 10
@@ -346,47 +348,63 @@ def run_pipeline(input_video, pose_model, tracker, people_metrics, device):
     cap = cv2.VideoCapture(input_video)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     out = cv2.VideoWriter(
         output_video, cv2.VideoWriter_fourcc(*"mp4v"), FPS, (width, height)
     )
 
+    processed = 0
+    pbar = tqdm(
+        desc="Frames",
+        unit="frame",
+        total=total_frames if total_frames > 0 else None,
+    )
     try:
-        while cap.isOpened():
-            success, frame = cap.read()
-            if not success:
-                break
+        try:
+            while cap.isOpened():
+                success, frame = cap.read()
+                if not success:
+                    break
+                processed += 1
 
-            results = pose_model.predict(
-                frame,
-                conf=POSE_CONF,
-                verbose=False,
-                device=device,
-                half=(device == "cuda"),
-            )
-            pose_result = results[0]
-            detections, det_xyxy, frame_keypoints, frame_kpt_conf = build_pose_detections(
-                pose_result
-            )
-            tracks = tracker.update_tracks(detections, frame=frame)
+                results = pose_model.predict(
+                    frame,
+                    conf=POSE_CONF,
+                    verbose=False,
+                    device=device,
+                    half=(device == "cuda"),
+                )
+                pose_result = results[0]
+                detections, det_xyxy, frame_keypoints, frame_kpt_conf = (
+                    build_pose_detections(pose_result)
+                )
+                tracks = tracker.update_tracks(detections, frame=frame)
 
-            process_tracks_on_frame(
-                frame,
-                height,
-                tracks,
-                det_xyxy,
-                frame_keypoints,
-                frame_kpt_conf,
-                people_metrics,
-            )
+                process_tracks_on_frame(
+                    frame,
+                    height,
+                    tracks,
+                    det_xyxy,
+                    frame_keypoints,
+                    frame_kpt_conf,
+                    people_metrics,
+                )
 
-            cv2.imshow(WINDOW_NAME, frame)
-            out.write(frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+                out.write(frame)
+                pbar.update(1)
+                if SHOW_PREVIEW:
+                    cv2.imshow(WINDOW_NAME, frame)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+        finally:
+            pbar.close()
+            if processed:
+                print(f"Finished: {processed} frame(s) processed.")
     finally:
         cap.release()
         out.release()
-        cv2.destroyAllWindows()
+        if SHOW_PREVIEW:
+            cv2.destroyAllWindows()
 
 
 def main():

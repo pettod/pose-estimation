@@ -1,3 +1,4 @@
 opencv-python
 deep-sort-realtime
 ultralytics
+tqdm
