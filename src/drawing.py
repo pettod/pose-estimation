@@ -1,4 +1,4 @@
-"""OpenCV overlays for skeleton, screen quadrants, and per-person HUD."""
+"""OpenCV overlays: quadrant split lines, skeleton, per-person HUD."""
 import cv2
 
 import config
@@ -6,35 +6,14 @@ import config
 from . import geometry, metrics, pose
 
 
-def draw_floor_zone_overlay(frame, frame_width, frame_height):
-    """2x2 split: vertical + horizontal midlines; quadrant labels (screen space)."""
+def draw_quadrant_split_lines(frame, frame_width, frame_height):
+    """Vertical + horizontal midlines (2×2 screen quadrants)."""
     w, h = frame_width, frame_height
     mx = w // 2
     my = h // 2
     color = (60, 60, 72)
     cv2.line(frame, (mx, 0), (mx, h), color, 1)
     cv2.line(frame, (0, my), (w, my), color, 1)
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    scale = 0.42
-    th = 1
-    placements = [
-        (w // 4, 18, "Top left"),
-        (3 * w // 4, 18, "Top right"),
-        (w // 4, h - 10, "Bottom left"),
-        (3 * w // 4, h - 10, "Bottom right"),
-    ]
-    for cx, y, text in placements:
-        (tw, _), _ = cv2.getTextSize(text, font, scale, th)
-        cv2.putText(
-            frame,
-            text,
-            (int(cx - tw // 2), y),
-            font,
-            scale,
-            (120, 120, 135),
-            th,
-            cv2.LINE_AA,
-        )
 
 
 def draw_pose_skeleton(frame, kpts, kconf, box_color):
@@ -67,7 +46,6 @@ def draw_worker_labels(
     current_status,
     total_dist,
     zone_key,
-    task_counts,
 ):
     cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
 
@@ -76,31 +54,21 @@ def draw_worker_labels(
 
     font = cv2.FONT_HERSHEY_SIMPLEX
     s1, t1 = 0.48, 1
-    s2, t2 = 0.42, 1
     zlabel = config.FLOOR_ZONE_LABELS.get(zone_key, zone_key)
-    line1 = f"{current_status} | ID {track_id} | {int(total_dist)}px | Screen: {zlabel}"
-    pp = task_counts.get("pick_place", 0)
-    lt = task_counts.get("lift_tray", 0)
-    mr = task_counts.get("move_rack", 0)
-    line2 = f"Tasks: pick {pp} | lift {lt} | rack {mr}"
+    line1 = f"{current_status} | ID {track_id} | {int(total_dist)}px | {zlabel}"
 
     (lw1, lh1), b1 = cv2.getTextSize(line1, font, s1, t1)
-    (lw2, lh2), b2 = cv2.getTextSize(line2, font, s2, t2)
     pad = 4
-    gap = 2
-    y2_base = max(28, y1 - 8)
-    y1_base = y2_base - lh2 - gap - lh1
-    text_w = max(lw1, lw2)
+    y1_base = max(22, y1 - 8)
     bg_x1 = max(0, x1 - pad)
     bg_y1 = max(0, y1_base - lh1 - pad)
-    bg_x2 = x1 + text_w + pad
-    bg_y2 = y2_base + b2 + pad
+    bg_x2 = x1 + lw1 + pad
+    bg_y2 = y1_base + b1 + pad
 
     cv2.rectangle(frame, (bg_x1, bg_y1), (bg_x2, bg_y2), status_bg, thickness=-1)
     cv2.putText(
         frame, line1, (x1, y1_base), font, s1, status_text_color, t1, cv2.LINE_AA
     )
-    cv2.putText(frame, line2, (x1, y2_base), font, s2, box_color, t2, cv2.LINE_AA)
 
 
 def process_tracks_on_frame(
@@ -147,5 +115,4 @@ def process_tracks_on_frame(
             current_status,
             m["total_dist"],
             zone_key,
-            m["tasks"],
         )
