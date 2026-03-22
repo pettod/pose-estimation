@@ -10,8 +10,10 @@ from ultralytics import YOLO
 # --- Configuration ---
 INPUT_VIDEO = "video_short.mp4"
 OUTPUT_SUFFIX = "_analyzed.mp4"
-POSE_CONF = 0.5
-FPS = 20
+
+POSE_MODEL = "yolov8l-pose.pt"
+POSE_CONF = 0.4
+FPS = 30
 WINDOW_NAME = "High-Accuracy Factory Analysis"
 
 ACTIVITY_THRESHOLD = 0.5
@@ -26,7 +28,7 @@ COCO_SKELETON = [
     (5, 11), (6, 12), (11, 12), (11, 13), (13, 15), (12, 14), (14, 16),
 ]
 
-KPT_CONF_MIN = 0.25
+KPT_CONF_MIN = 0.2
 IOU_MATCH_MIN = 0.1
 
 
@@ -94,7 +96,7 @@ def select_inference_device():
 
 
 def load_pose_model(device):
-    model = YOLO("yolov8m-pose.pt")
+    model = YOLO(POSE_MODEL)
     model.to(device)
     return model
 
