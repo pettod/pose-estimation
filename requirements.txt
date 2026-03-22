@@ -1,5 +1,6 @@
 opencv-python
-deep-sort-realtime
+filterpy
+scipy
 ultralytics
 tqdm
 fastapi>=0.115
