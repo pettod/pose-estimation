@@ -6,6 +6,10 @@ import mediapipe as mp
 from collections import defaultdict
 import math
 
+
+input_video = "video.mp4"
+MIN_DETECTION_CONFIDENCE = 0.6
+
 # -------------------------
 # 1. Setup & Config
 # -------------------------
@@ -14,7 +18,7 @@ model = YOLO("yolov8m.pt")
 tracker = DeepSort(max_age=20, n_init=3, nms_max_overlap=0.5)
 
 mp_pose = mp.solutions.pose
-pose = mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.6)
+pose = mp_pose.Pose(static_image_mode=False, min_detection_confidence=MIN_DETECTION_CONFIDENCE)
 
 # Metrics Storage
 people_metrics = defaultdict(lambda: {
@@ -25,20 +29,17 @@ people_metrics = defaultdict(lambda: {
     "last_pos": None
 })
 
-# Define a "Work Zone" (Polygon) to ignore the background IDs 6, 19, etc.
-# Coordinates should be adjusted based on your specific camera angle
-WORK_ZONE = np.array([[100, 400], [1100, 400], [1200, 700], [50, 700]], np.int32)
-
 def get_dist(p1, p2):
     return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)
 
 # -------------------------
 # 2. Main Processing
 # -------------------------
-cap = cv2.VideoCapture("factory.mp4")
+output_video = input_video.replace(".mp4", "_analyzed.mp4")
+cap = cv2.VideoCapture(input_video)
 width  = int(cap.get(3))
 height = int(cap.get(4))
-out = cv2.VideoWriter("analyzed_factory.mp4", cv2.VideoWriter_fourcc(*'mp4v'), 20, (width, height))
+out = cv2.VideoWriter(output_video, cv2.VideoWriter_fourcc(*'mp4v'), 20, (width, height))
 
 while cap.isOpened():
     success, frame = cap.read()
@@ -50,9 +51,7 @@ while cap.isOpened():
     detections = []
     for r in results[0].boxes.data.tolist():
         x1, y1, x2, y2, score, cls = r
-        # Filter: Only accept if in the lower half of the screen (work area)
-        if y2 > 300: 
-            detections.append(([x1, y1, x2-x1, y2-y1], score, 'person'))
+        detections.append(([x1, y1, x2-x1, y2-y1], score, 'person'))
 
     # Update Tracker
     tracks = tracker.update_tracks(detections, frame=frame)
